@@ -1,0 +1,28 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/tile.gd" id="1"]
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_base"]
+top_radius = 0.85
+bottom_radius = 0.85
+height = 0.55
+radial_segments = 48
+rings = 1
+
+[node name="Tile" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Base" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.275, 0)
+mesh = SubResource("CylinderMesh_base")
+
+[node name="NumberLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+text = "0"
+font_size = 100
+pixel_size = 0.008
+outline_size = 16
+modulate = Color(0.352941, 0.290196, 0.4, 1)
+outline_modulate = Color(1, 1, 1, 0.95)
+billboard = 1
+double_sided = true

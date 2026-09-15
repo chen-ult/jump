@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__godot-ai__session_manage"
+    ]
+  }
+}
