@@ -5,8 +5,11 @@ const PlayerScene := preload("res://scenes/player.tscn")
 const EquationScript := preload("res://scripts/equation.gd")
 const LevelData := preload("res://scripts/level_data.gd")
 const HudScript := preload("res://scripts/hud.gd")
+const MenuScript := preload("res://scripts/menu.gd")
+const Progress := preload("res://scripts/progress.gd")
 
 const SPACING := 2.2
+const TILE_HEIGHT := 0.55  # 棋子圆柱的高度,顶面即主角的站立面
 
 var equation
 var active_slot: int = -1
@@ -16,6 +19,7 @@ var levels: Array = []
 var player: Node3D
 var tiles: Dictionary = {}
 var hud: CanvasLayer
+var menu: CanvasLayer
 var camera: Camera3D
 
 var _busy: bool = false
@@ -27,12 +31,54 @@ func _ready() -> void:
 	_create_environment()
 	hud = HudScript.new()
 	add_child(hud)
-	levels = LevelData.all_levels()
-	_load_level(0)
+	hud.pause_pressed.connect(_on_pause)
+	hud.resume_pressed.connect(_on_resume)
+	hud.quit_pressed.connect(_on_quit_to_menu)
+	# 启动菜单:标题 → 选择模式 → 选择关卡 → 进入对应关卡
+	menu = MenuScript.new()
+	menu.layer = 10
+	add_child(menu)
+	menu.start_game.connect(_on_menu_start)
+
+
+# 菜单选中某关后进入该关
+func _on_menu_start(level_idx: int) -> void:
+	if menu:
+		menu.queue_free()
+		menu = null
+	# 目前只有加法模式,取加法关卡列表后进入所选的第 level_idx 关
+	levels = LevelData.levels_of_mode("add")
+	_load_level(level_idx)
+
+
+# ---- 暂停 / 返回菜单 -------------------------------------------------------
+
+func _on_pause() -> void:
+	get_tree().paused = true
+
+
+func _on_resume() -> void:
+	get_tree().paused = false
+
+
+func _on_quit_to_menu() -> void:
+	get_tree().paused = false
+	_return_to_menu()
+
+
+# 退出到主界面:清空当前关卡,重建启动菜单
+func _return_to_menu() -> void:
+	_clear_grid()
+	_busy = false
+	equation = null
+	menu = MenuScript.new()
+	menu.layer = 10
+	add_child(menu)
+	menu.start_game.connect(_on_menu_start)
 
 
 func _process(_delta: float) -> void:
-	if _busy:
+	if _busy or menu != null:
 		return
 	if Input.is_action_just_pressed("cursor_left"):
 		_move_cursor(-1)
@@ -122,7 +168,7 @@ func _spawn_grid() -> void:
 		var n: int = entry["n"]
 		var tile = TileScene.instantiate()
 		add_child(tile)
-		tile.position = grid_to_world(c, r)
+		tile.position = tile_base_world(c, r)
 		tile.set_number(n)
 		tiles["%d,%d" % [c, r]] = tile
 	# 起点垫(number=0,不填数字)
@@ -131,7 +177,7 @@ func _spawn_grid() -> void:
 	var sr: int = start["r"]
 	var spad = TileScene.instantiate()
 	add_child(spad)
-	spad.position = grid_to_world(sc, sr)
+	spad.position = tile_base_world(sc, sr)
 	spad.set_number(0)
 	tiles["%d,%d" % [sc, sr]] = spad
 
@@ -147,7 +193,13 @@ func _spawn_player() -> void:
 
 # ---- 网格接口(player 调用) ------------------------------------------------
 
+# 格子"站立点"的世界坐标(圆柱顶面):主角位置与跳跃落点都用它
 func grid_to_world(col: int, row: int) -> Vector3:
+	return Vector3((col - 1) * SPACING, TILE_HEIGHT, (row - 1) * SPACING)
+
+
+# 格子"基座"的世界坐标(底面贴地):只在铺格子时用
+func tile_base_world(col: int, row: int) -> Vector3:
 	return Vector3((col - 1) * SPACING, 0.0, (row - 1) * SPACING)
 
 
@@ -208,6 +260,7 @@ func _next_empty(from: int) -> int:
 
 func _win() -> void:
 	_busy = true
+	Progress.on_level_passed("add", level_index)
 	hud.show_win()
 	_spawn_confetti()
 	await get_tree().create_timer(2.0).timeout
@@ -226,7 +279,17 @@ func _wrong() -> void:
 	hud.clear_slots()
 	active_slot = 0
 	hud.set_active(0)
+	_reset_player()
 	_busy = false
+
+
+# 答错后把主角送回起始弹跳垫
+func _reset_player() -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	var start: Dictionary = levels[level_index]["start"]
+	player.reset_to(start["c"], start["r"])
+	player.face_toward(camera.global_position)
 
 
 func _spawn_confetti() -> void:

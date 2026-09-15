@@ -1,104 +1,38 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene format=3 uid="uid://5u84whi2nlxq"]
 
-[ext_resource type="Script" path="res://scripts/player.gd" id="1"]
-[ext_resource type="Shader" path="res://shaders/toon.gdshader" id="2"]
+[ext_resource type="Script" uid="uid://bjgfeu6agxhuf" path="res://scripts/player.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://bxosd4a2s3jpk" path="res://model/piece.glb" id="2"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial_shadow"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.1, 0.1, 0.15, 0.25)
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_shadow"]
 top_radius = 0.52
 bottom_radius = 0.52
 height = 0.03
 
-[sub_resource type="SphereMesh" id="SphereMesh_body"]
-radius = 0.5
-height = 1.0
-radial_segments = 48
-rings = 24
-
-[sub_resource type="SphereMesh" id="SphereMesh_eye"]
-radius = 0.1
-height = 1.2
-
-[sub_resource type="SphereMesh" id="SphereMesh_cheek"]
-radius = 0.07
-height = 0.8
-
-[sub_resource type="SphereMesh" id="SphereMesh_mouth"]
-radius = 0.07
-height = 0.6
+[sub_resource type="StandardMaterial3D" id="StandardMaterial_ring"]
+shading_mode = 0
 
 [sub_resource type="TorusMesh" id="TorusMesh_ring"]
 inner_radius = 0.6
 outer_radius = 0.74
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial_shadow"]
-albedo_color = Color(0.1, 0.1, 0.15, 0.25)
-transparency = 1
-shading_mode = 0
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_body"]
-shader = ExtResource("2")
-shader_parameter/albedo_color = Vector3(1, 0.878431, 0.541176)
-shader_parameter/rim_color = Vector3(1, 1, 1)
-shader_parameter/rim_strength = 0.45
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial_eye"]
-albedo_color = Color(0.227451, 0.184314, 0.270588, 1)
-shading_mode = 0
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial_cheek"]
-albedo_color = Color(1, 0.603922, 0.635294, 1)
-shading_mode = 0
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial_mouth"]
-albedo_color = Color(0.352941, 0.290196, 0.4, 1)
-shading_mode = 0
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial_ring"]
-albedo_color = Color(1, 1, 1, 1)
-emission_enabled = true
-emission = Color(1, 0.478431, 0.635294, 1)
-emission_energy_multiplier = 2.0
-shading_mode = 0
-
-[node name="Player" type="Node3D"]
+[node name="Player" type="Node3D" unique_id=212779000]
 script = ExtResource("1")
 
-[node name="Shadow" type="MeshInstance3D" parent="."]
-mesh = SubResource("CylinderMesh_shadow")
+[node name="Shadow" type="MeshInstance3D" parent="." unique_id=1934542720]
 material_override = SubResource("StandardMaterial_shadow")
+mesh = SubResource("CylinderMesh_shadow")
 
-[node name="Body" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
-mesh = SubResource("SphereMesh_body")
-material_override = SubResource("ShaderMaterial_body")
+[node name="Body" type="Node3D" parent="." unique_id=1056379425]
 
-[node name="EyeL" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.16, 0.58, 0.34)
-mesh = SubResource("SphereMesh_eye")
-material_override = SubResource("StandardMaterial_eye")
+[node name="Model" parent="Body" unique_id=2097096347 instance=ExtResource("2")]
 
-[node name="EyeR" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.16, 0.58, 0.34)
-mesh = SubResource("SphereMesh_eye")
-material_override = SubResource("StandardMaterial_eye")
-
-[node name="CheekL" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.29, 0.45, 0.29)
-mesh = SubResource("SphereMesh_cheek")
-material_override = SubResource("StandardMaterial_cheek")
-
-[node name="CheekR" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.29, 0.45, 0.29)
-mesh = SubResource("SphereMesh_cheek")
-material_override = SubResource("StandardMaterial_cheek")
-
-[node name="Mouth" type="MeshInstance3D" parent="."]
-transform = Transform3D(1.4, 0, 0, 0, 0.5, 0, 0, 0, 0.6, 0, 0.4, 0.44)
-mesh = SubResource("SphereMesh_mouth")
-material_override = SubResource("StandardMaterial_mouth")
-
-[node name="ChargeRing" type="MeshInstance3D" parent="."]
+[node name="ChargeRing" type="MeshInstance3D" parent="." unique_id=541152025]
 transform = Transform3D(0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, 0.06, 0)
-mesh = SubResource("TorusMesh_ring")
-material_override = SubResource("StandardMaterial_ring")
 visible = false
+material_override = SubResource("StandardMaterial_ring")
+mesh = SubResource("TorusMesh_ring")

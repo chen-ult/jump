@@ -1,12 +1,12 @@
 {
-  "_提示": "改格子颜色看 tile_colors,改起点颜色看 start_color,改关卡看 levels。? 是待填空位,0 表示该位置没有格子,等式的每个符号之间用空格分开。",
-  "tile_colors": ["#ff9aa2", "#ffb7b2", "#ffdac1", "#fff1c1", "#e2f0cb", "#b5ead7", "#a2d2ff", "#b8c0ff", "#cdb4f6"],
-  "start_color": "#b5e6c3",
+  "_提示": "改格子颜色看 tile_colors,改起点颜色看 start_color,改关卡看 levels。每关的 mode 填 add(加法)或 sub(减法),目前只启用加法。? 是待填空位,0 表示该位置没有格子,等式的每个符号之间用空格分开。",
+  "tile_colors": ["#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a"],
+  "start_color": "#1e3a8a",
   "levels": [
-	{ "equation": "? + ? = 3",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
-	{ "equation": "? + ? = 10", "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
-	{ "equation": "? - ? = 2",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
-	{ "equation": "? - ? = ?",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
-	{ "equation": "? + ? = ?",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] }
+	{ "mode": "add", "equation": "? + ? = 3",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
+	{ "mode": "add", "equation": "? + ? = 10", "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
+	{ "mode": "sub", "equation": "? - ? = 2",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
+	{ "mode": "sub", "equation": "? - ? = ?",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] },
+	{ "mode": "add", "equation": "? + ? = ?",  "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3] }
   ]
 }

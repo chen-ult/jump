@@ -1,6 +1,10 @@
 extends CanvasLayer
 
-# 等式 HUD:关卡标签 + 等式 token + 圆圈高亮 + 结算横幅
+# 等式 HUD:关卡标签 + 等式 token + 圆圈高亮 + 结算横幅 + 暂停
+
+signal pause_pressed
+signal resume_pressed
+signal quit_pressed
 
 const SLOT_SIZE := 76.0
 const BORDER_DEFAULT := Color("#e6d9ef")
@@ -16,6 +20,8 @@ var _charge_root: Control
 var _charge_bar: ProgressBar
 var _charge_label: Label
 var _fill_sb: StyleBoxFlat
+var _pause_btn: Button
+var _pause_overlay: Control
 
 var slot_labels: Array = []
 var slot_styles: Array = []
@@ -32,18 +38,27 @@ func _build_ui() -> void:
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(_root)
 
+	# 左上角:关卡标签
+	_level_label = _make_label("", 34, Color("#5a4a66"))
+	_level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_level_label.anchor_left = 0.0
+	_level_label.anchor_top = 0.0
+	_level_label.anchor_right = 0.0
+	_level_label.anchor_bottom = 0.0
+	_level_label.offset_left = 22.0
+	_level_label.offset_top = 14.0
+	_level_label.offset_right = 300.0
+	_level_label.offset_bottom = 62.0
+	_root.add_child(_level_label)
+
+	# 顶部居中:题目 + 操作提示(一起靠顶)
 	var top := VBoxContainer.new()
 	top.anchor_left = 0.0
 	top.anchor_right = 1.0
 	top.anchor_top = 0.0
-	top.offset_top = 26.0
-	top.add_theme_constant_override("separation", 18)
+	top.offset_top = 10.0
+	top.add_theme_constant_override("separation", 10)
 	_root.add_child(top)
-
-	_level_label = _make_label("", 34, Color("#5a4a66"))
-	var c1 := CenterContainer.new()
-	c1.add_child(_level_label)
-	top.add_child(c1)
 
 	_eq_box = HBoxContainer.new()
 	_eq_box.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -68,6 +83,7 @@ func _build_ui() -> void:
 	_root.add_child(_banner)
 
 	_build_charge_ui()
+	_build_pause_ui()
 
 
 func _make_label(txt: String, size: int, color: Color) -> Label:
@@ -119,6 +135,99 @@ func _build_charge_ui() -> void:
 	_fill_sb.set_corner_radius_all(14)
 	_charge_bar.add_theme_stylebox_override("fill", _fill_sb)
 	box.add_child(_charge_bar)
+
+
+# 右上角暂停按钮 + 暂停弹层(继续游戏 / 退出)
+func _build_pause_ui() -> void:
+	_pause_btn = Button.new()
+	_pause_btn.text = "⏸"
+	_pause_btn.add_theme_font_size_override("font_size", 30)
+	_pause_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_pause_btn.offset_left = -76.0
+	_pause_btn.offset_top = 14.0
+	_pause_btn.offset_right = -16.0
+	_pause_btn.offset_bottom = 62.0
+	_pause_btn.pressed.connect(_on_pause_btn_pressed)
+	_root.add_child(_pause_btn)
+
+	# 弹层 process_mode=ALWAYS,保证 get_tree().paused 时仍可点击
+	_pause_overlay = Control.new()
+	_pause_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_pause_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	_pause_overlay.visible = false
+	_root.add_child(_pause_overlay)
+
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.5)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pause_overlay.add_child(dim)
+
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 26)
+	_pause_overlay.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "暂停"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 64)
+	title.add_theme_color_override("font_color", Color("#ffffff"))
+	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+	title.add_theme_constant_override("outline_size", 10)
+	vbox.add_child(title)
+
+	var resume_btn := _make_pause_button("继续游戏", Color("#ff7aa2"))
+	resume_btn.pressed.connect(_on_resume_btn_pressed)
+	var c1 := CenterContainer.new()
+	c1.add_child(resume_btn)
+	vbox.add_child(c1)
+
+	var quit_btn := _make_pause_button("退出", Color("#9a8aa9"))
+	quit_btn.pressed.connect(_on_quit_btn_pressed)
+	var c2 := CenterContainer.new()
+	c2.add_child(quit_btn)
+	vbox.add_child(c2)
+
+
+func _make_pause_button(txt: String, color: Color) -> Button:
+	var b := Button.new()
+	b.text = txt
+	b.custom_minimum_size = Vector2(220, 60)
+	b.add_theme_font_size_override("font_size", 30)
+	b.add_theme_color_override("font_color", Color("#ffffff"))
+	b.add_theme_color_override("font_hover_color", Color("#ffffff"))
+	b.add_theme_color_override("font_pressed_color", Color("#ffffff"))
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = color
+	normal.set_corner_radius_all(30)
+	b.add_theme_stylebox_override("normal", normal)
+	var hover := StyleBoxFlat.new()
+	hover.bg_color = color.lightened(0.15)
+	hover.set_corner_radius_all(30)
+	b.add_theme_stylebox_override("hover", hover)
+	var pressed := StyleBoxFlat.new()
+	pressed.bg_color = color.darkened(0.15)
+	pressed.set_corner_radius_all(30)
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	return b
+
+
+func _on_pause_btn_pressed() -> void:
+	_pause_overlay.visible = true
+	pause_pressed.emit()
+
+
+func _on_resume_btn_pressed() -> void:
+	_pause_overlay.visible = false
+	resume_pressed.emit()
+
+
+func _on_quit_btn_pressed() -> void:
+	_pause_overlay.visible = false
+	quit_pressed.emit()
 
 
 func set_charge(progress: float, tiles: int) -> void:

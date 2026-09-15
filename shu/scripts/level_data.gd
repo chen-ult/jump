@@ -17,8 +17,18 @@ static func all_levels() -> Array:
 	return out
 
 
+# 按模式筛选关卡,例如 "add"(加法) / "sub"(减法)
+static func levels_of_mode(mode: String) -> Array:
+	var out: Array = []
+	for lv in all_levels():
+		if lv.get("mode", "add") == mode:
+			out.append(lv)
+	return out
+
+
 static func _build_level(raw: Dictionary) -> Dictionary:
 	return {
+		"mode": str(raw.get("mode", "add")),
 		"equation": _parse_equation(str(raw.get("equation", ""))),
 		"grid": _parse_grid(raw.get("grid", [])),
 		"start": _parse_start(raw.get("start", [1, 3])),
@@ -75,11 +85,11 @@ static func _parse_start(s) -> Dictionary:
 # JSON 写错时兜底用的内置关卡,保证游戏还能跑
 static func _fallback_levels() -> Array:
 	return [
-		{"equation": [_slot(), _op("+"), _slot(), _eq(), _num(3)],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
-		{"equation": [_slot(), _op("+"), _slot(), _eq(), _num(10)], "grid": _std_grid(), "start": {"c": 1, "r": 3}},
-		{"equation": [_slot(), _op("-"), _slot(), _eq(), _num(2)],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
-		{"equation": [_slot(), _op("-"), _slot(), _eq(), _slot()],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
-		{"equation": [_slot(), _op("+"), _slot(), _eq(), _slot()],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
+		{"mode": "add", "equation": [_slot(), _op("+"), _slot(), _eq(), _num(3)],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
+		{"mode": "add", "equation": [_slot(), _op("+"), _slot(), _eq(), _num(10)], "grid": _std_grid(), "start": {"c": 1, "r": 3}},
+		{"mode": "sub", "equation": [_slot(), _op("-"), _slot(), _eq(), _num(2)],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
+		{"mode": "sub", "equation": [_slot(), _op("-"), _slot(), _eq(), _slot()],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
+		{"mode": "add", "equation": [_slot(), _op("+"), _slot(), _eq(), _slot()],  "grid": _std_grid(), "start": {"c": 1, "r": 3}},
 	]
 
 

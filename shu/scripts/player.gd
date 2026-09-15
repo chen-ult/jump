@@ -15,15 +15,49 @@ var grid_row: int = 3
 var state: int = State.IDLE
 var charge_dir: Vector2i = Vector2i.ZERO
 var charge_time: float = 0.0
+var _ground_y: float = 0.0  # 站立面高度(圆柱顶面),阴影贴在这里
 
-@onready var _body: MeshInstance3D = $Body
+@onready var _body: Node3D = $Body
+@onready var _model: Node3D = $Body/Model
 @onready var _shadow: MeshInstance3D = $Shadow
 @onready var _charge_ring: MeshInstance3D = $ChargeRing
 
 
 func _ready() -> void:
+	# 棋子模型 glb 原始尺寸过大(高约 4.16),统一缩到 0.3 以匹配棋子格
+	_model.scale = Vector3(0.3, 0.3, 0.3)
 	# 蓄力环是 TorusMesh(默认竖直),转 90° 让它平躺在地面
 	_charge_ring.rotation_degrees = Vector3(90, 0, 0)
+	# 给棋子模型加一圈描边,让主角在深蓝格子上更突出
+	_add_outline()
+
+
+# 倒置外壳描边:复制模型网格,正面剔除 + 沿法线外扩,只留一圈深色轮廓
+func _add_outline() -> void:
+	var mesh_inst := _find_mesh_instance(_model)
+	if mesh_inst == null or mesh_inst.mesh == null:
+		return
+	var outline := MeshInstance3D.new()
+	outline.name = "Outline"
+	outline.mesh = mesh_inst.mesh
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_FRONT
+	mat.grow = true
+	mat.grow_amount = 0.12  # 局部空间外扩量,乘 0.3 缩放后约 0.036 世界单位
+	mat.albedo_color = Color("#000000")
+	outline.material_override = mat
+	mesh_inst.add_child(outline)
+
+
+func _find_mesh_instance(node: Node) -> MeshInstance3D:
+	if node is MeshInstance3D:
+		return node
+	for child in node.get_children():
+		var found := _find_mesh_instance(child)
+		if found:
+			return found
+	return null
 
 
 func setup(controller: Node, col: int, row: int) -> void:
@@ -31,6 +65,20 @@ func setup(controller: Node, col: int, row: int) -> void:
 	grid_col = col
 	grid_row = row
 	position = grid.grid_to_world(col, row)
+	_ground_y = position.y
+
+
+# 答错后把主角送回起始弹跳垫,并清空蓄力/跳跃状态
+func reset_to(col: int, row: int) -> void:
+	grid_col = col
+	grid_row = row
+	position = grid.grid_to_world(col, row)
+	_ground_y = position.y
+	state = State.IDLE
+	charge_time = 0.0
+	charge_dir = Vector2i.ZERO
+	_charge_ring.visible = false
+	_body.scale = Vector3.ONE
 
 
 func face_toward(world_pos: Vector3) -> void:
@@ -62,7 +110,7 @@ func _process(delta: float) -> void:
 
 
 func _update_shadow() -> void:
-	_shadow.global_position = Vector3(global_position.x, 0.02, global_position.z)
+	_shadow.global_position = Vector3(global_position.x, _ground_y + 0.02, global_position.z)
 	_charge_ring.position = Vector3(0, 0.06, 0)
 
 
