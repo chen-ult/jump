@@ -27,13 +27,17 @@ static func levels_of_mode(mode: String) -> Array:
 
 
 static func _build_level(raw: Dictionary) -> Dictionary:
+	var start := _parse_start(raw.get("start", [1, 3]))
+	var test := bool(raw.get("test", false))
 	return {
 		"mode": str(raw.get("mode", "add")),
 		"equation": _parse_equation(str(raw.get("equation", ""))),
 		"grid": _parse_grid(raw.get("grid", [])),
-		"start": _parse_start(raw.get("start", [1, 3])),
+		"start": start,
 		"sign_flip": bool(raw.get("sign_flip", false)),
 		"memory": bool(raw.get("memory", false)),
+		"test": test,
+		"pads": _parse_test_pads(raw, start) if test else [],
 	}
 
 
@@ -87,6 +91,22 @@ static func _parse_start(s) -> Dictionary:
 		c = int(s[0])
 		r = int(s[1])
 	return {"c": c, "r": r}
+
+
+# 测试模式:起点垫上方沿行号递减方向排开矮中高三个跳跃垫,最后一个为终点垫
+static func _parse_test_pads(raw: Dictionary, start: Dictionary) -> Array:
+	var heights: Array = raw.get("pads", [])
+	var out: Array = []
+	var sc: int = int(start.get("c", 1))
+	var sr: int = int(start.get("r", 3))
+	for i in heights.size():
+		out.append({
+			"height": str(heights[i]),
+			"c": sc,
+			"r": sr - (i + 1),
+			"goal": i == heights.size() - 1,
+		})
+	return out
 
 
 # JSON 写错时兜底用的内置关卡,保证游戏还能跑

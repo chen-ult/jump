@@ -5,8 +5,7 @@ extends CanvasLayer
 signal pause_pressed
 signal resume_pressed
 signal quit_pressed
-signal next_mode_pressed
-signal menu_pressed
+signal slot_clicked(index: int)
 
 const SLOT_SIZE := 76.0
 const BORDER_DEFAULT := Color("#e6d9ef")
@@ -24,9 +23,6 @@ var _charge_label: Label
 var _fill_sb: StyleBoxFlat
 var _pause_btn: Button
 var _pause_overlay: Control
-var _next_overlay: Control
-var _next_btn: Button
-var _next_menu_btn: Button
 
 var slot_labels: Array = []
 var slot_styles: Array = []
@@ -42,6 +38,7 @@ func _ready() -> void:
 func _build_ui() -> void:
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE  # 让鼠标点击穿透到 3D 场景(测试模式选落点)
 	add_child(_root)
 
 	# 左上角:关卡标签
@@ -90,7 +87,6 @@ func _build_ui() -> void:
 
 	_build_charge_ui()
 	_build_pause_ui()
-	_build_next_overlay()
 
 
 func _make_label(txt: String, size: int, color: Color) -> Label:
@@ -249,8 +245,25 @@ func set_charge(progress: float, tiles: int, stomp: bool = false) -> void:
 	_charge_label.add_theme_color_override("font_color", Color("#b07a2f") if full else Color("#5a4a66"))
 
 
+# 测试模式:蓄力条显示力度百分比
+func set_charge_power(progress: float) -> void:
+	if progress <= 0.0:
+		_charge_root.visible = false
+		return
+	_charge_root.visible = true
+	_charge_bar.value = progress
+	_charge_label.text = "力度 %d%%" % int(progress * 100.0)
+	var full: bool = progress >= 1.0
+	_fill_sb.bg_color = Color("#ffd166") if full else Color("#ff7aa2")
+	_charge_label.add_theme_color_override("font_color", Color("#b07a2f") if full else Color("#5a4a66"))
+
+
 func set_level(n: int) -> void:
 	_level_label.text = "第 %d 关" % n
+
+
+func set_level_text(txt: String) -> void:
+	_level_label.text = txt
 
 
 func set_hint(txt: String) -> void:
@@ -258,7 +271,13 @@ func set_hint(txt: String) -> void:
 		_hint_label.text = txt
 
 
+# 测试模式:隐藏等式框(没有等式),提示交给 set_hint
+func setup_test_mode() -> void:
+	_eq_box.visible = false
+
+
 func set_tokens(tokens: Array) -> void:
+	_eq_box.visible = true
 	for c in _eq_box.get_children():
 		c.queue_free()
 	slot_labels.clear()
@@ -273,12 +292,15 @@ func set_tokens(tokens: Array) -> void:
 			"slot":
 				var s := _make_slot()
 				_eq_box.add_child(s)
+				var idx := slot_labels.size()
 				slot_labels.append(s)
+				s.gui_input.connect(_on_slot_input.bind(idx))
 
 
 func _make_slot() -> Label:
 	var l := Label.new()
 	l.text = "?"
+	l.mouse_filter = Control.MOUSE_FILTER_STOP  # 让圆圈能被鼠标左键点击选择
 	l.custom_minimum_size = Vector2(SLOT_SIZE, SLOT_SIZE)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -291,6 +313,12 @@ func _make_slot() -> Label:
 	l.add_theme_stylebox_override("normal", sb)
 	slot_styles.append(sb)
 	return l
+
+
+# 点击圆圈:直接选中该空位(等价于用 ←/→ 把高亮移到它上面)
+func _on_slot_input(event: InputEvent, idx: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		slot_clicked.emit(idx)
 
 
 func _set_border(sb: StyleBoxFlat, color: Color, w: int) -> void:
@@ -351,12 +379,6 @@ func show_win() -> void:
 	_show_banner("🎉 太棒了！", 2.0)
 
 
-func show_finish() -> void:
-	_banner_label.text = "🎉 全部通关！"
-	_banner_label.add_theme_color_override("font_color", Color("#ffd166"))
-	_banner.visible = true
-
-
 func _show_banner(txt: String, dur: float) -> void:
 	_banner_label.text = txt
 	_banner_label.add_theme_color_override("font_color", Color("#ffd166"))
@@ -364,55 +386,3 @@ func _show_banner(txt: String, dur: float) -> void:
 	var t := create_tween()
 	t.tween_interval(dur)
 	t.tween_callback(func(): _banner.visible = false)
-
-
-# 通关某模式全部关卡后弹出的「进入下一运算?」提示层
-func _build_next_overlay() -> void:
-	_next_overlay = Control.new()
-	_next_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_next_overlay.visible = false
-	_root.add_child(_next_overlay)
-
-	var dim := ColorRect.new()
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0, 0, 0, 0.5)
-	_next_overlay.add_child(dim)
-
-	var vbox := VBoxContainer.new()
-	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 26)
-	_next_overlay.add_child(vbox)
-
-	var title := _make_label("🎉 本模式全部通关！", 48, Color("#ffd166"))
-	vbox.add_child(title)
-
-	_next_btn = _make_pause_button("进入下一运算", Color("#ff7aa2"))
-	_next_btn.custom_minimum_size = Vector2(300, 64)
-	_next_btn.pressed.connect(_on_next_btn_pressed)
-	var c1 := CenterContainer.new()
-	c1.add_child(_next_btn)
-	vbox.add_child(c1)
-
-	_next_menu_btn = _make_pause_button("返回菜单", Color("#9a8aa9"))
-	_next_menu_btn.pressed.connect(_on_next_menu_btn_pressed)
-	var c2 := CenterContainer.new()
-	c2.add_child(_next_menu_btn)
-	vbox.add_child(c2)
-
-
-func show_next_mode(mode_name: String) -> void:
-	_next_btn.text = "进入下一运算：" + mode_name
-	_next_overlay.visible = true
-
-
-func hide_next_overlay() -> void:
-	_next_overlay.visible = false
-
-
-func _on_next_btn_pressed() -> void:
-	next_mode_pressed.emit()
-
-
-func _on_next_menu_btn_pressed() -> void:
-	menu_pressed.emit()

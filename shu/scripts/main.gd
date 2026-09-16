@@ -9,12 +9,9 @@ const MenuScript := preload("res://scripts/menu.gd")
 const Progress := preload("res://scripts/progress.gd")
 const Solvability := preload("res://scripts/solvability.gd")
 
-# 运算模式的展示顺序与名称(用于通关后提示进入下一运算)
-const MODE_ORDER := ["add", "sub", "mul", "div", "op", "sign", "memory"]
-const MODE_NAMES := {"add": "加法", "sub": "减法", "mul": "乘法", "div": "除法", "op": "运算符", "sign": "翻转符号", "memory": "记忆翻牌"}
-
 const SPACING := 2.2
 const TILE_HEIGHT := 0.55  # 棋子圆柱的高度,顶面即主角的站立面
+const PLAYER_RADIUS := 0.2  # 主角"碰撞"半径(棋子底盘),落地判定时身体碰垫即算落上
 
 var equation
 var active_slot: int = -1
@@ -31,6 +28,7 @@ var camera: Camera3D
 var _busy: bool = false
 var _memory_mode: bool = false
 var _sign_flip_mode: bool = false
+var _test_mode: bool = false
 var _last_land_slot: int = -1
 var _revealed_tile: Node3D = null
 
@@ -44,8 +42,7 @@ func _ready() -> void:
 	hud.pause_pressed.connect(_on_pause)
 	hud.resume_pressed.connect(_on_resume)
 	hud.quit_pressed.connect(_on_quit_to_menu)
-	hud.next_mode_pressed.connect(_on_next_mode_pressed)
-	hud.menu_pressed.connect(_on_next_menu_pressed)
+	hud.slot_clicked.connect(_on_slot_clicked)
 	# 启动菜单:标题 → 选择模式 → 选择关卡 → 进入对应关卡
 	menu = MenuScript.new()
 	menu.layer = 10
@@ -89,6 +86,13 @@ func _return_to_menu() -> void:
 	menu.start_game.connect(_on_menu_start)
 
 
+# 一章(模式)通关后:退回章节选择界面
+func _return_to_mode_select() -> void:
+	_return_to_menu()
+	if menu:
+		menu.show_mode_page()
+
+
 func _process(_delta: float) -> void:
 	if _busy or menu != null:
 		return
@@ -105,7 +109,40 @@ func _process(_delta: float) -> void:
 
 func _update_charge_ui() -> void:
 	if player and is_instance_valid(player):
-		hud.set_charge(player.charge_progress(), player.charge_tiles(), player.is_stomping())
+		if _test_mode:
+			hud.set_charge_power(player.charge_progress())
+		else:
+			hud.set_charge(player.charge_progress(), player.charge_tiles(), player.is_stomping())
+
+
+# 测试模式:鼠标点击 3D 弹跳垫,给主角设定跳跃角度
+func _unhandled_input(event: InputEvent) -> void:
+	if not _test_mode:
+		return
+	if _busy or menu != null:
+		return
+	if player == null or not is_instance_valid(player):
+		return
+	if player.is_airborne():
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var mb := event as InputEventMouseButton
+		_try_aim_click(mb.position)
+
+
+# 鼠标左键命中弹跳垫顶面 -> 设定落点(角度);点自己脚下的垫 -> 取消瞄准
+func _try_aim_click(mpos: Vector2) -> void:
+	var from := camera.project_ray_origin(mpos)
+	var dir := camera.project_ray_normal(mpos)
+	var hit := pad_at_mouse(from, dir)
+	if hit.is_empty():
+		return
+	if hit["col"] == player.grid_col and hit["row"] == player.grid_row:
+		player.clear_aim()
+		return
+	var pad_tile = tiles["%d,%d" % [hit["col"], hit["row"]]]
+	var target := Vector3(pad_tile.position.x, hit["top"], pad_tile.position.z)
+	player.aim_at(target)
 
 
 # ---- 场景搭建 -------------------------------------------------------------
@@ -161,6 +198,10 @@ func _load_level(idx: int) -> void:
 	var data: Dictionary = levels[idx]
 	_memory_mode = bool(data.get("memory", false))
 	_sign_flip_mode = bool(data.get("sign_flip", false))
+	_test_mode = bool(data.get("test", false))
+	if _test_mode:
+		_load_test_level(data)
+		return
 	if _memory_mode:
 		data["grid"] = _shuffled_solvable_grid(data)
 	var check := Solvability.check(data["grid"], data["start"], data["equation"], _sign_flip_mode)
@@ -177,6 +218,17 @@ func _load_level(idx: int) -> void:
 	hud.set_active(0)
 	hud.set_hint(_hint_text())
 	_spawn_grid()
+	_spawn_player()
+
+
+# 测试模式:无等式,铺设起点垫 + 大中小三个跳跃垫,交给连续距离跳
+func _load_test_level(data: Dictionary) -> void:
+	equation = null
+	active_slot = -1
+	hud.set_level_text("测试模式")
+	hud.setup_test_mode()
+	hud.set_hint(_hint_text())
+	_spawn_test_grid()
 	_spawn_player()
 
 
@@ -243,11 +295,91 @@ func _spawn_grid() -> void:
 	tiles["%d,%d" % [sc, sr]] = spad
 
 
+# 测试模式:起点垫 + 矮中高三个跳跃垫(最后一个为终点)
+func _spawn_test_grid() -> void:
+	var data: Dictionary = levels[level_index]
+	var start: Dictionary = data["start"]
+	var spad = TileScene.instantiate()
+	add_child(spad)
+	spad.position = tile_base_world(start["c"], start["r"])
+	spad.set_start_pad()
+	tiles["%d,%d" % [start["c"], start["r"]]] = spad
+	for p in data.get("pads", []):
+		var t = TileScene.instantiate()
+		add_child(t)
+		t.position = tile_base_world(p["c"], p["r"])
+		t.set_test_pad(p["height"], p["goal"])
+		tiles["%d,%d" % [p["c"], p["r"]]] = t
+
+
+# 测试模式:给定发射起点/水平方向/水平速度/竖直速度,求落点所在垫子
+# 返回 {col,row,point,time,content};没落在任何垫上返回 {}
+func test_landing_pad(start: Vector3, dir_h: Vector3, vx: float, vy: float, gravity: float) -> Dictionary:
+	var best_t := INF
+	var best: Dictionary = {}
+	for key in tiles.keys():
+		var t = tiles[key]
+		if not is_instance_valid(t) or t.kind != "pad":
+			continue
+		var top: float = t.top_height()
+		var dy: float = top - start.y
+		var vy2: float = vy * vy
+		if vy2 < 2.0 * gravity * dy:
+			continue  # 这个速度到不了该垫顶面高度
+		var tt: float
+		if absf(dy) < 0.001:
+			tt = 2.0 * vy / gravity
+		else:
+			tt = (vy + sqrt(vy2 - 2.0 * gravity * dy)) / gravity
+		var land := start + Vector3(dir_h.x * vx * tt, 0.0, dir_h.z * vx * tt)
+		land.y = top
+		var dx: float = land.x - t.position.x
+		var dz: float = land.z - t.position.z
+		var reach: float = t.radius() + PLAYER_RADIUS
+		if dx * dx + dz * dz <= reach * reach and tt < best_t:
+			best_t = tt
+			var parts := str(key).split(",")
+			best = {
+				"col": int(parts[0]),
+				"row": int(parts[1]),
+				"point": land,
+				"time": tt,
+				"content": {"type": "pad", "goal": t.is_goal()},
+			}
+	return best
+
+
+# 测试模式:从鼠标位置发出一条射线,命中某个垫子顶面则返回 {col,row,top};没命中返回 {}
+func pad_at_mouse(from: Vector3, dir: Vector3) -> Dictionary:
+	var best_t := INF
+	var best: Dictionary = {}
+	for key in tiles.keys():
+		var t = tiles[key]
+		if not is_instance_valid(t) or t.kind != "pad":
+			continue
+		var top: float = t.top_height()
+		if absf(dir.y) < 0.0001:
+			continue
+		var tt: float = (top - from.y) / dir.y
+		if tt <= 0.0:
+			continue
+		var hit := from + dir * tt
+		var dx: float = hit.x - t.position.x
+		var dz: float = hit.z - t.position.z
+		var r: float = t.radius()
+		if dx * dx + dz * dz <= r * r and tt < best_t:
+			best_t = tt
+			var parts := str(key).split(",")
+			best = {"col": int(parts[0]), "row": int(parts[1]), "top": top}
+	return best
+
+
 func _spawn_player() -> void:
 	player = PlayerScene.instantiate()
 	add_child(player)
 	var start: Dictionary = levels[level_index]["start"]
 	player.setup(self, start["c"], start["r"])
+	player.set_test_mode(_test_mode)
 	player.face_toward(camera.global_position)
 	player.landed.connect(_on_player_landed)
 	player.departed.connect(_on_player_departed)
@@ -289,7 +421,13 @@ func _on_player_landed(col: int, row: int, content: Dictionary) -> void:
 	if tile:
 		tile.play_land_feedback()
 		_reveal_tile(tile)
-	if _busy or content.is_empty():
+	if _busy:
+		return
+	if _test_mode:
+		if content.get("goal", false):
+			_win()
+		return
+	if content.is_empty():
 		return
 	match content.get("type", ""):
 		"num":
@@ -316,12 +454,24 @@ func _on_player_landed(col: int, row: int, content: Dictionary) -> void:
 
 
 func _move_cursor(delta: int) -> void:
+	if equation == null:
+		return
 	var n: int = equation.slots_count()
 	if n <= 0:
 		return
 	active_slot = (active_slot + delta) % n
 	if active_slot < 0:
 		active_slot += n
+	hud.set_active(active_slot)
+
+
+# 鼠标左键点击等式圆圈:直接选中该空位
+func _on_slot_clicked(idx: int) -> void:
+	if _busy or menu != null:
+		return
+	if equation == null or idx < 0 or idx >= equation.slots_count():
+		return
+	active_slot = idx
 	hud.set_active(active_slot)
 
 
@@ -368,6 +518,9 @@ func _on_player_stomped(col: int, row: int) -> void:
 
 # 蓄力过多跃出格子:惩罚,清空等式并回起点重来
 func _on_player_fell_off(_col: int, _row: int) -> void:
+	if _test_mode:
+		_test_fall_off()
+		return
 	if _busy:
 		return
 	_busy = true
@@ -381,8 +534,22 @@ func _on_player_fell_off(_col: int, _row: int) -> void:
 	_busy = false
 
 
+# 测试模式坠空:没落在垫子上,提示并回起点重来(跌落动画播完才触发,文字随后显示)
+func _test_fall_off() -> void:
+	if _busy:
+		return
+	_busy = true
+	hud.show_wrong("没有落在弹跳垫上")
+	await get_tree().create_timer(0.7).timeout
+	_reset_player()
+	_busy = false
+
+
 # R 手动重置:清空等式并回到起点(记忆/翻转模式答错不自动重来的逃生口)
 func _manual_reset() -> void:
+	if _test_mode:
+		_reset_player()
+		return
 	if equation == null:
 		return
 	equation.clear_slots()
@@ -393,7 +560,9 @@ func _manual_reset() -> void:
 
 
 func _hint_text() -> String:
-	var base := "W A S D 蓄力跳 · ← → 移动圆圈 · R 重置"
+	if _test_mode:
+		return "鼠标点击弹跳垫设定角度 · 按住 W / A / S / D 蓄力 · 松开跳跃 · R 重置"
+	var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
 	if _sign_flip_mode:
 		return base + " · 空格 蓄满翻转符号"
 	if _memory_mode:
@@ -412,13 +581,8 @@ func _win() -> void:
 	if level_index + 1 < levels.size():
 		_load_level(level_index + 1)
 	else:
-		var next := _next_mode()
-		if next != "":
-			hud.show_next_mode(MODE_NAMES[next])
-			# 保持 _busy=true 冻结玩家,等玩家点「进入下一运算」或「返回菜单」
-		else:
-			hud.show_finish()
-			_busy = false
+		# 本章(模式)结束:退回章节选择界面
+		_return_to_mode_select()
 
 
 func _wrong() -> void:
@@ -445,32 +609,6 @@ func _reset_player() -> void:
 	var start: Dictionary = levels[level_index]["start"]
 	player.reset_to(start["c"], start["r"])
 	player.face_toward(camera.global_position)
-
-
-# 当前模式之后的下一运算 id;没有则返回 ""
-func _next_mode() -> String:
-	var i := MODE_ORDER.find(current_mode)
-	if i >= 0 and i + 1 < MODE_ORDER.size():
-		return MODE_ORDER[i + 1]
-	return ""
-
-
-# 通关提示里点「进入下一运算」:切到下一模式并进入其第 1 关
-func _on_next_mode_pressed() -> void:
-	hud.hide_next_overlay()
-	var next := _next_mode()
-	if next == "":
-		_return_to_menu()
-		return
-	current_mode = next
-	levels = LevelData.levels_of_mode(next)
-	_load_level(0)
-
-
-# 通关提示里点「返回菜单」
-func _on_next_menu_pressed() -> void:
-	hud.hide_next_overlay()
-	_return_to_menu()
 
 
 func _spawn_confetti() -> void:

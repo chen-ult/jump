@@ -1,5 +1,5 @@
 {
-  "_提示": "改格子颜色看 tile_colors,改起点颜色看 start_color,改关卡看 levels。每关 mode 填 add(加法)/sub(减法)/mul(乘法)/div(除法)/op(运算符)/sign(翻转符号)/memory(记忆翻牌)。? 是待填空位;grid 里数字(int)是数字格、字符串(如 \"+\")是运算符格、0 或 null 表示空格;等式每个符号之间用空格分开,乘号用 × 或 *,除号用 ÷ 或 /。sign 模式的关加 \"sign_flip\": true 开启空格蓄满翻转;memory 模式的关加 \"memory\": true 隐藏数字。不可解的关会在选关界面标 ⚠️。",
+  "_提示": "改格子颜色看 tile_colors,改起点颜色看 start_color,改关卡看 levels。每关 mode 填 add(加法)/sub(减法)/mul(乘法)/div(除法)/op(运算符)/sign(翻转符号)/memory(记忆翻牌)/test(测试模式)。? 是待填空位;grid 里数字(int)是数字格、字符串(如 \"+\")是运算符格、0 或 null 表示空格;等式每个符号之间用空格分开,乘号用 × 或 *,除号用 ÷ 或 /。sign 模式的关加 \"sign_flip\": true 开启空格蓄满翻转;memory 模式的关加 \"memory\": true 隐藏数字。test 模式的关加 \"test\": true 并用 pads 指定矮中高三个跳跃垫(如 [\"low\",\"medium\",\"high\"],最后一个为终点垫)。不可解的关会在选关界面标 ⚠️。",
   "tile_colors": ["#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a", "#1e3a8a"],
   "start_color": "#1e3a8a",
   "levels": [
@@ -17,6 +17,7 @@
 	{ "mode": "sign", "equation": "? + ? = 1", "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3], "sign_flip": true },
 	{ "mode": "sign", "equation": "? + ? = 6", "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3], "sign_flip": true },
 	{ "mode": "memory", "equation": "? + ? = 10", "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3], "memory": true },
-	{ "mode": "memory", "equation": "? + ? = 11", "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3], "memory": true }
+	{ "mode": "memory", "equation": "? + ? = 11", "grid": [[1, 2, 3], [4, 5, 6], [7, 8, 9]], "start": [1, 3], "memory": true },
+	{ "mode": "test", "test": true, "start": [1, 3], "pads": ["low", "medium", "high"] }
   ]
 }

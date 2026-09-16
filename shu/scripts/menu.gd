@@ -17,6 +17,7 @@ const MODES := [
 	{"id": "op", "name": "运算符"},
 	{"id": "sign", "name": "翻转符号"},
 	{"id": "memory", "name": "记忆翻牌"},
+	{"id": "test", "name": "测试模式"},
 ]
 
 var _root: Control
@@ -160,8 +161,12 @@ func _populate_levels(mode: String) -> void:
 		var c := CenterContainer.new()
 		c.add_child(b)
 		_level_list.add_child(c)
-		var check := Solvability.check(mode_levels[i]["grid"], mode_levels[i]["start"], mode_levels[i]["equation"], bool(mode_levels[i].get("sign_flip", false)))
-		var broken: bool = not check["solvable"]
+		var is_test := bool(mode_levels[i].get("test", false))
+		var check: Dictionary = {}
+		var broken := false
+		if not is_test:
+			check = Solvability.check(mode_levels[i]["grid"], mode_levels[i]["start"], mode_levels[i]["equation"], bool(mode_levels[i].get("sign_flip", false)))
+			broken = not check["solvable"]
 		if locked:
 			b.text = "🔒 第 %d 关" % (i + 1)
 			b.disabled = true
@@ -234,6 +239,11 @@ func _show_levels() -> void:
 	_main_page.visible = false
 	_mode_page.visible = false
 	_level_page.visible = true
+
+
+# 供外部直接跳到章节(模式)选择页:一章通关后回到这里
+func show_mode_page() -> void:
+	_show_modes()
 
 
 func _on_start_pressed() -> void:
