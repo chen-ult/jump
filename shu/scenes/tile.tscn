@@ -17,12 +17,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.275, 0)
 mesh = SubResource("CylinderMesh_base")
 
 [node name="NumberLabel" type="Label3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
 text = "0"
 font_size = 100
 pixel_size = 0.008
 outline_size = 16
-modulate = Color(1, 1, 1, 1)
-outline_modulate = Color(0.05, 0.1, 0.25, 0.9)
+modulate = Color(1, 0.82, 0.4, 1)
+outline_modulate = Color(0.05, 0.1, 0.25, 1)
 billboard = 1
 double_sided = true

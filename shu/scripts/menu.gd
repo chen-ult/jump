@@ -1,16 +1,30 @@
 extends CanvasLayer
 
-# 启动菜单:标题页(开始/退出) → 选择模式(加法) → 选择关卡(第1/2/3关)
+# 启动菜单:标题页(开始/退出) → 选择模式(加减乘除) → 选择关卡
 
-signal start_game(level_index: int)
+signal start_game(mode: String, level_index: int)
 
 const LevelData := preload("res://scripts/level_data.gd")
 const Progress := preload("res://scripts/progress.gd")
+const Solvability := preload("res://scripts/solvability.gd")
+
+# 模式列表:id 与 levels.json 里的 mode 对应,顺序即菜单显示顺序
+const MODES := [
+	{"id": "add", "name": "加法"},
+	{"id": "sub", "name": "减法"},
+	{"id": "mul", "name": "乘法"},
+	{"id": "div", "name": "除法"},
+	{"id": "op", "name": "运算符"},
+	{"id": "sign", "name": "翻转符号"},
+	{"id": "memory", "name": "记忆翻牌"},
+]
 
 var _root: Control
 var _main_page: Control
 var _mode_page: Control
 var _level_page: Control
+var _level_list: VBoxContainer
+var _selected_mode: String = "add"
 
 
 func _ready() -> void:
@@ -63,7 +77,7 @@ func _build_main_page() -> void:
 	row.add_child(quit_btn)
 
 
-# 选择模式页:目前只有加法
+# 选择模式页:加法 / 减法 / 乘法 / 除法
 func _build_mode_page() -> void:
 	_mode_page = Control.new()
 	_mode_page.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -73,7 +87,7 @@ func _build_mode_page() -> void:
 	var vbox := VBoxContainer.new()
 	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 40)
+	vbox.add_theme_constant_override("separation", 24)
 	_mode_page.add_child(vbox)
 
 	var header := Label.new()
@@ -83,11 +97,17 @@ func _build_mode_page() -> void:
 	header.add_theme_color_override("font_color", Color("#5a4a66"))
 	vbox.add_child(header)
 
-	var add_btn := _make_button("加法", Color("#ff7aa2"))
-	add_btn.pressed.connect(_on_addition_pressed)
-	var c1 := CenterContainer.new()
-	c1.add_child(add_btn)
-	vbox.add_child(c1)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 28)
+	grid.add_theme_constant_override("v_separation", 20)
+	for m in MODES:
+		var btn := _make_button(m["name"], Color("#ff7aa2"))
+		btn.pressed.connect(_on_mode_pressed.bind(m["id"]))
+		grid.add_child(btn)
+	var cgrid := CenterContainer.new()
+	cgrid.add_child(grid)
+	vbox.add_child(cgrid)
 
 	var back_btn := _make_button("返回", Color("#9a8aa9"))
 	back_btn.pressed.connect(_on_back_pressed)
@@ -96,7 +116,7 @@ func _build_mode_page() -> void:
 	vbox.add_child(c2)
 
 
-# 选择关卡页:按"加法"模式动态列出第1/2/3关
+# 选择关卡页:标题 + 关卡列表(按所选模式动态填充) + 返回
 func _build_level_page() -> void:
 	_level_page = Control.new()
 	_level_page.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -116,27 +136,45 @@ func _build_level_page() -> void:
 	header.add_theme_color_override("font_color", Color("#5a4a66"))
 	vbox.add_child(header)
 
-	var add_levels := LevelData.levels_of_mode("add")
-	var unlocked := Progress.unlocked_count("add")
-	for i in add_levels.size():
-		var locked: bool = i >= unlocked
-		var b := _make_button("第 %d 关" % (i + 1), Color("#ff7aa2"))
-		var c := CenterContainer.new()
-		c.add_child(b)
-		vbox.add_child(c)
-		if locked:
-			b.text = "🔒 第 %d 关" % (i + 1)
-			b.disabled = true
-			b.add_theme_stylebox_override("disabled", _locked_style())
-			b.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.7))
-		else:
-			b.pressed.connect(_on_level_pressed.bind(i))
+	_level_list = VBoxContainer.new()
+	_level_list.alignment = BoxContainer.ALIGNMENT_CENTER
+	_level_list.add_theme_constant_override("separation", 18)
+	vbox.add_child(_level_list)
 
 	var back_btn := _make_button("返回", Color("#9a8aa9"))
 	back_btn.pressed.connect(_on_level_back_pressed)
 	var c2 := CenterContainer.new()
 	c2.add_child(back_btn)
 	vbox.add_child(c2)
+
+
+# 按模式重建关卡按钮:未解锁置灰 🔒,几何不可解置灰 ⚠️
+func _populate_levels(mode: String) -> void:
+	for child in _level_list.get_children():
+		child.queue_free()
+	var mode_levels := LevelData.levels_of_mode(mode)
+	var unlocked := Progress.unlocked_count(mode)
+	for i in mode_levels.size():
+		var locked: bool = i >= unlocked
+		var b := _make_button("第 %d 关" % (i + 1), Color("#ff7aa2"))
+		var c := CenterContainer.new()
+		c.add_child(b)
+		_level_list.add_child(c)
+		var check := Solvability.check(mode_levels[i]["grid"], mode_levels[i]["start"], mode_levels[i]["equation"], bool(mode_levels[i].get("sign_flip", false)))
+		var broken: bool = not check["solvable"]
+		if locked:
+			b.text = "🔒 第 %d 关" % (i + 1)
+			b.disabled = true
+			b.add_theme_stylebox_override("disabled", _locked_style())
+			b.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.7))
+		elif broken:
+			b.text = "⚠️ 第 %d 关" % (i + 1)
+			b.disabled = true
+			b.add_theme_stylebox_override("disabled", _locked_style())
+			b.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.7))
+			push_warning("关卡 %d 不可解:%s" % [i + 1, check["reason"]])
+		else:
+			b.pressed.connect(_on_level_pressed.bind(i))
 
 
 func _add_background(page: Control) -> void:
@@ -202,12 +240,14 @@ func _on_start_pressed() -> void:
 	_show_modes()
 
 
-func _on_addition_pressed() -> void:
+func _on_mode_pressed(mode: String) -> void:
+	_selected_mode = mode
+	_populate_levels(mode)
 	_show_levels()
 
 
 func _on_level_pressed(idx: int) -> void:
-	start_game.emit(idx)
+	start_game.emit(_selected_mode, idx)
 
 
 func _on_back_pressed() -> void:

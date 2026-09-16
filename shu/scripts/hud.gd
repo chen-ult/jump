@@ -5,6 +5,8 @@ extends CanvasLayer
 signal pause_pressed
 signal resume_pressed
 signal quit_pressed
+signal next_mode_pressed
+signal menu_pressed
 
 const SLOT_SIZE := 76.0
 const BORDER_DEFAULT := Color("#e6d9ef")
@@ -22,11 +24,15 @@ var _charge_label: Label
 var _fill_sb: StyleBoxFlat
 var _pause_btn: Button
 var _pause_overlay: Control
+var _next_overlay: Control
+var _next_btn: Button
+var _next_menu_btn: Button
 
 var slot_labels: Array = []
 var slot_styles: Array = []
 var _active_index: int = -1
 var _pulse_tween: Tween
+var _hint_label: Label
 
 
 func _ready() -> void:
@@ -67,9 +73,9 @@ func _build_ui() -> void:
 	c2.add_child(_eq_box)
 	top.add_child(c2)
 
-	var hint := _make_label("W A S D 蓄力跳 · ← → 移动圆圈", 20, Color("#9a8aa9"))
+	_hint_label = _make_label("W A S D 蓄力跳 · ← → 移动圆圈", 20, Color("#9a8aa9"))
 	var c3 := CenterContainer.new()
-	c3.add_child(hint)
+	c3.add_child(_hint_label)
 	top.add_child(c3)
 
 	_banner = CenterContainer.new()
@@ -84,6 +90,7 @@ func _build_ui() -> void:
 
 	_build_charge_ui()
 	_build_pause_ui()
+	_build_next_overlay()
 
 
 func _make_label(txt: String, size: int, color: Color) -> Label:
@@ -230,13 +237,13 @@ func _on_quit_btn_pressed() -> void:
 	quit_pressed.emit()
 
 
-func set_charge(progress: float, tiles: int) -> void:
+func set_charge(progress: float, tiles: int, stomp: bool = false) -> void:
 	if progress <= 0.0 or tiles <= 0:
 		_charge_root.visible = false
 		return
 	_charge_root.visible = true
 	_charge_bar.value = progress
-	_charge_label.text = "跳 %d 格" % tiles
+	_charge_label.text = "蓄力翻转" if stomp else "跳 %d 格" % tiles
 	var full: bool = progress >= 1.0
 	_fill_sb.bg_color = Color("#ffd166") if full else Color("#ff7aa2")
 	_charge_label.add_theme_color_override("font_color", Color("#b07a2f") if full else Color("#5a4a66"))
@@ -244,6 +251,11 @@ func set_charge(progress: float, tiles: int) -> void:
 
 func set_level(n: int) -> void:
 	_level_label.text = "第 %d 关" % n
+
+
+func set_hint(txt: String) -> void:
+	if _hint_label:
+		_hint_label.text = txt
 
 
 func set_tokens(tokens: Array) -> void:
@@ -309,7 +321,7 @@ func _pulse(l: Label) -> void:
 	_pulse_tween.tween_property(l, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 
-func set_slot_value(i: int, v: int) -> void:
+func set_slot_value(i: int, v) -> void:
 	if i >= 0 and i < slot_labels.size():
 		slot_labels[i].text = str(v)
 
@@ -319,8 +331,8 @@ func clear_slots() -> void:
 		l.text = "?"
 
 
-func show_wrong() -> void:
-	_show_banner("再试一次～", 1.1)
+func show_wrong(txt: String = "再试一次～") -> void:
+	_show_banner(txt, 1.1)
 	for sb in slot_styles:
 		_set_border(sb, BORDER_WRONG, 6)
 	var t := create_tween()
@@ -352,3 +364,55 @@ func _show_banner(txt: String, dur: float) -> void:
 	var t := create_tween()
 	t.tween_interval(dur)
 	t.tween_callback(func(): _banner.visible = false)
+
+
+# 通关某模式全部关卡后弹出的「进入下一运算?」提示层
+func _build_next_overlay() -> void:
+	_next_overlay = Control.new()
+	_next_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_next_overlay.visible = false
+	_root.add_child(_next_overlay)
+
+	var dim := ColorRect.new()
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.color = Color(0, 0, 0, 0.5)
+	_next_overlay.add_child(dim)
+
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 26)
+	_next_overlay.add_child(vbox)
+
+	var title := _make_label("🎉 本模式全部通关！", 48, Color("#ffd166"))
+	vbox.add_child(title)
+
+	_next_btn = _make_pause_button("进入下一运算", Color("#ff7aa2"))
+	_next_btn.custom_minimum_size = Vector2(300, 64)
+	_next_btn.pressed.connect(_on_next_btn_pressed)
+	var c1 := CenterContainer.new()
+	c1.add_child(_next_btn)
+	vbox.add_child(c1)
+
+	_next_menu_btn = _make_pause_button("返回菜单", Color("#9a8aa9"))
+	_next_menu_btn.pressed.connect(_on_next_menu_btn_pressed)
+	var c2 := CenterContainer.new()
+	c2.add_child(_next_menu_btn)
+	vbox.add_child(c2)
+
+
+func show_next_mode(mode_name: String) -> void:
+	_next_btn.text = "进入下一运算：" + mode_name
+	_next_overlay.visible = true
+
+
+func hide_next_overlay() -> void:
+	_next_overlay.visible = false
+
+
+func _on_next_btn_pressed() -> void:
+	next_mode_pressed.emit()
+
+
+func _on_next_menu_btn_pressed() -> void:
+	menu_pressed.emit()

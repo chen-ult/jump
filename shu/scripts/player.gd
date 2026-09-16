@@ -1,13 +1,17 @@
 extends Node3D
 
-signal landed(col: int, row: int, number: int)
+signal landed(col: int, row: int, content: Dictionary)
+signal departed(col: int, row: int)  # 真正跳离当前格时发出(记忆玩法用)
+signal stomped(col: int, row: int)   # 蓄满翻转:原地跳一下(翻转符号玩法用)
+signal fell_off(from_col: int, from_row: int)  # 蓄力过多跃出格子(惩罚:掉下去重来)
 
-enum State { IDLE, CHARGING, JUMPING }
+enum State { IDLE, CHARGING, JUMPING, STOMPING, FALLING }
 
 const MAX_CHARGE := 1.2
 const MAX_TILES := 3
 const JUMP_DURATION := 0.32
 const JUMP_HEIGHT := 1.4
+const FALL_DURATION := 0.55  # 坠落(下坠+缩小+翻滚)时长
 
 var grid: Node = null
 var grid_col: int = 1
@@ -26,8 +30,7 @@ var _ground_y: float = 0.0  # 站立面高度(圆柱顶面),阴影贴在这里
 func _ready() -> void:
 	# 棋子模型 glb 原始尺寸过大(高约 4.16),统一缩到 0.3 以匹配棋子格
 	_model.scale = Vector3(0.3, 0.3, 0.3)
-	# 蓄力环是 TorusMesh(默认竖直),转 90° 让它平躺在地面
-	_charge_ring.rotation_degrees = Vector3(90, 0, 0)
+	# 蓄力环是 TorusMesh,默认就平躺(XZ 平面、中心轴沿 Y),无需旋转
 	# 给棋子模型加一圈描边,让主角在深蓝格子上更突出
 	_add_outline()
 
@@ -79,6 +82,7 @@ func reset_to(col: int, row: int) -> void:
 	charge_dir = Vector2i.ZERO
 	_charge_ring.visible = false
 	_body.scale = Vector3.ONE
+	_body.rotation = Vector3.ZERO
 
 
 func face_toward(world_pos: Vector3) -> void:
@@ -100,12 +104,22 @@ func _process(delta: float) -> void:
 				charge_dir = d
 				state = State.CHARGING
 				charge_time = 0.0
+			elif Input.is_action_just_pressed("stomp"):
+				state = State.STOMPING
+				charge_time = 0.0
 		State.CHARGING:
 			charge_time += delta
 			_update_squash()
 			if _just_released(charge_dir):
 				_do_jump()
+		State.STOMPING:
+			charge_time += delta
+			_update_squash()
+			if Input.is_action_just_released("stomp"):
+				_do_stomp()
 		State.JUMPING:
+			pass
+		State.FALLING:
 			pass
 
 
@@ -133,44 +147,81 @@ func _charge_distance() -> int:
 
 # 供 HUD 读取:当前蓄力进度(0..1),非蓄力时为 0
 func charge_progress() -> float:
-	if state != State.CHARGING:
+	if state != State.CHARGING and state != State.STOMPING:
 		return 0.0
 	return clampf(charge_time / MAX_CHARGE, 0.0, 1.0)
 
 
 # 供 HUD 读取:当前蓄力对应的跳跃格数(1..MAX_TILES),非蓄力时为 0
 func charge_tiles() -> int:
-	if state != State.CHARGING:
+	if state != State.CHARGING and state != State.STOMPING:
 		return 0
 	return _charge_distance()
 
 
-# 解析实际落点:优先落到蓄力对应的格;若该格不可达(边缘/空洞),退到该方向最近的可达格
-func _resolve_target() -> Vector2i:
-	var dist := _charge_distance()
-	for k in range(dist, 0, -1):
-		var c := grid_col + charge_dir.x * k
-		var r := grid_row + charge_dir.y * k
-		if grid.is_walkable(c, r):
-			return Vector2i(c, r)
-	return Vector2i(grid_col, grid_row)
+# 供 HUD 读取:当前是否在蓄力翻转(空格)
+func is_stomping() -> bool:
+	return state == State.STOMPING
 
 
+# 供 main 读取:当前是否在坠落动画(冻结光标/重置输入用)
+func is_falling() -> bool:
+	return state == State.FALLING
+
+
+# 落地按"蓄力对应的格"精确判定:落点不在格子(跃出/空洞)则掉下去,交给 main 惩罚
 func _do_jump() -> void:
 	_charge_ring.visible = false
 	_body.scale = Vector3.ONE
 	var from := Vector2i(grid_col, grid_row)
-	var target := _resolve_target()
-	if target == from:
-		# 该方向一个可达格都没有,原地弹一下取消
-		state = State.IDLE
-		_cancel_boing()
+	var dist := _charge_distance()
+	var target := Vector2i(grid_col + charge_dir.x * dist, grid_row + charge_dir.y * dist)
+	if not grid.is_walkable(target.x, target.y):
+		_fall_off(from, target)
 		return
-	var tiles := maxi(absi(target.x - from.x), absi(target.y - from.y))
+	departed.emit(from.x, from.y)
 	grid_col = target.x
 	grid_row = target.y
 	state = State.JUMPING
-	_jump_arc(position, grid.grid_to_world(target.x, target.y), tiles)
+	_jump_arc(position, grid.grid_to_world(target.x, target.y), dist)
+
+
+# 跃出格子:先跳到那个"没有格子"的空位,再从空位坠落(下坠+缩小+翻滚),最后发 fell_off
+func _fall_off(from: Vector2i, target: Vector2i) -> void:
+	state = State.FALLING
+	var start := position
+	var target_world: Vector3 = grid.grid_to_world(target.x, target.y)
+	var tiles := maxi(absi(target.x - from.x), absi(target.y - from.y))
+	# 第一步:和正常跳一样的弧线,跳到空位(那里脚下没有格子)
+	var mid := (start + target_world) * 0.5 + Vector3(0, JUMP_HEIGHT * tiles, 0)
+	_body.scale = Vector3(0.9, 1.15, 0.9)
+	var jump := create_tween()
+	jump.tween_method(_jump_pos.bind(start, mid, target_world), 0.0, 1.0, JUMP_DURATION * tiles)
+	await jump.finished
+	# 第二步:从空位坠落
+	var fall := create_tween()
+	fall.tween_property(self, "position:y", target_world.y - 1.4, FALL_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	fall.parallel().tween_property(_body, "scale", Vector3(0.25, 0.25, 0.25), FALL_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	fall.parallel().tween_property(_body, "rotation:y", _body.rotation.y + TAU, FALL_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await fall.finished
+	state = State.IDLE
+	fell_off.emit(from.x, from.y)
+
+
+# 蓄满后松开空格:原地跳一下,并翻转脚下格子的符号
+func _do_stomp() -> void:
+	_charge_ring.visible = false
+	_body.scale = Vector3.ONE
+	if charge_time < MAX_CHARGE:
+		# 没蓄满就松手,只原地弹一下,不翻转
+		state = State.IDLE
+		_cancel_boing()
+		return
+	state = State.IDLE
+	var t := create_tween()
+	t.tween_property(self, "position:y", _ground_y + 0.7, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.tween_property(self, "position:y", _ground_y, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	stomped.emit(grid_col, grid_row)
 
 
 func _jump_arc(start: Vector3, end: Vector3, tiles: int) -> void:
@@ -191,7 +242,7 @@ func _on_land() -> void:
 	_body.scale = Vector3(1.35, 0.6, 1.35)
 	var t := create_tween()
 	t.tween_property(_body, "scale", Vector3.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	landed.emit(grid_col, grid_row, grid.tile_number_at(grid_col, grid_row))
+	landed.emit(grid_col, grid_row, grid.cell_content_at(grid_col, grid_row))
 
 
 func _cancel_boing() -> void:

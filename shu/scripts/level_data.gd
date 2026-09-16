@@ -32,18 +32,22 @@ static func _build_level(raw: Dictionary) -> Dictionary:
 		"equation": _parse_equation(str(raw.get("equation", ""))),
 		"grid": _parse_grid(raw.get("grid", [])),
 		"start": _parse_start(raw.get("start", [1, 3])),
+		"sign_flip": bool(raw.get("sign_flip", false)),
+		"memory": bool(raw.get("memory", false)),
 	}
 
 
 # "? + ? = 3" -> [slot, op(+), slot, op(=), num(3)]
+# 支持 + - ×(或 *) ÷(或 /),统一归一到 * / 供 Expression 求值
 static func _parse_equation(s: String) -> Array:
 	var tokens: Array = []
-	# 自动在运算符/问号两边加空格再切分,容忍 "?+?=3" 这种没空格的写法
-	var spaced := s.replace("+", " + ").replace("-", " - ").replace("=", " = ").replace("?", " ? ")
+	# 先把乘除符号归一,再给所有运算符/问号两边加空格切分,容忍 "?+?=3" 这种没空格的写法
+	var norm := s.replace("×", "*").replace("÷", "/")
+	var spaced := norm.replace("+", " + ").replace("-", " - ").replace("*", " * ").replace("/", " / ").replace("=", " = ").replace("?", " ? ")
 	for p in spaced.split(" ", false):
 		if p == "?":
 			tokens.append({"type": "slot"})
-		elif p == "+" or p == "-":
+		elif p == "+" or p == "-" or p == "*" or p == "/":
 			tokens.append({"type": "op", "value": p})
 		elif p == "=":
 			tokens.append({"type": "op", "value": "="})
@@ -54,7 +58,8 @@ static func _parse_equation(s: String) -> Array:
 	return tokens
 
 
-# [[1,2,3],[4,5,6],[7,8,9]] -> [{n,c,r}, ...],0 表示没有格子(跳过)
+# [[1,2,3],[4,5,6],[7,8,9]] -> [{type,value,c,r}, ...]
+# int/float(>0) → 数字格;String(如 "+") → 运算符格;0/null → 空格(跳过)
 static func _parse_grid(g) -> Array:
 	var out: Array = []
 	if not (g is Array):
@@ -64,11 +69,13 @@ static func _parse_grid(g) -> Array:
 		if not (row is Array):
 			continue
 		for c in row.size():
-			var n = row[c]
-			if n is int or n is float:
-				var ni := int(n)
+			var cell = row[c]
+			if cell is int or cell is float:
+				var ni := int(cell)
 				if ni > 0:
-					out.append({"n": ni, "c": c, "r": r})
+					out.append({"type": "num", "value": ni, "c": c, "r": r})
+			elif cell is String and cell != "":
+				out.append({"type": "op", "value": cell, "c": c, "r": r})
 	return out
 
 
@@ -114,6 +121,6 @@ static func _std_grid() -> Array:
 	var n := 1
 	for r in 3:
 		for c in 3:
-			out.append({"n": n, "c": c, "r": r})
+			out.append({"type": "num", "value": n, "c": c, "r": r})
 			n += 1
 	return out
