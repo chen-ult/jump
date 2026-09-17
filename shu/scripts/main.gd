@@ -8,6 +8,7 @@ const HudScript := preload("res://scripts/hud.gd")
 const MenuScript := preload("res://scripts/menu.gd")
 const Progress := preload("res://scripts/progress.gd")
 const Solvability := preload("res://scripts/solvability.gd")
+const LevelGenerator := preload("res://scripts/level_generator.gd")
 
 const SPACING := 2.2
 const TILE_HEIGHT := 0.55  # 棋子圆柱的高度,顶面即主角的站立面
@@ -29,6 +30,9 @@ var _busy: bool = false
 var _memory_mode: bool = false
 var _sign_flip_mode: bool = false
 var _test_mode: bool = false
+var _test_target: String = ""
+var _endless_mode: bool = false
+var _endless_level: int = 1
 var _last_land_slot: int = -1
 var _revealed_tile: Node3D = null
 
@@ -56,6 +60,9 @@ func _on_menu_start(mode: String, level_idx: int) -> void:
 		menu.queue_free()
 		menu = null
 	current_mode = mode
+	if mode == "endless":
+		_start_endless()
+		return
 	levels = LevelData.levels_of_mode(mode)
 	_load_level(level_idx)
 
@@ -78,6 +85,7 @@ func _on_quit_to_menu() -> void:
 # 退出到主界面:清空当前关卡,重建启动菜单
 func _return_to_menu() -> void:
 	_clear_grid()
+	_endless_mode = false
 	_busy = false
 	equation = null
 	menu = MenuScript.new()
@@ -98,10 +106,13 @@ func _process(_delta: float) -> void:
 		return
 	if player and is_instance_valid(player) and player.is_falling():
 		return  # 坠落动画中,冻结光标/重置输入
-	if Input.is_action_just_pressed("cursor_left"):
-		_move_cursor(-1)
-	elif Input.is_action_just_pressed("cursor_right"):
-		_move_cursor(1)
+	if _test_mode:
+		_test_handle_target_input()
+	else:
+		if Input.is_action_just_pressed("cursor_left"):
+			_move_cursor(-1)
+		elif Input.is_action_just_pressed("cursor_right"):
+			_move_cursor(1)
 	if Input.is_action_just_pressed("reset"):
 		_manual_reset()
 	_update_charge_ui()
@@ -115,34 +126,103 @@ func _update_charge_ui() -> void:
 			hud.set_charge(player.charge_progress(), player.charge_tiles(), player.is_stomping())
 
 
-# 测试模式:鼠标点击 3D 弹跳垫,给主角设定跳跃角度
-func _unhandled_input(event: InputEvent) -> void:
-	if not _test_mode:
+# 测试模式:方向键在候选垫子间循环选目标(跳过脚下垫子),adv>0 朝终点
+func _test_handle_target_input() -> void:
+	if player == null or not is_instance_valid(player) or player.is_airborne():
 		return
-	if _busy or menu != null:
-		return
+	var adv := 0
+	if Input.is_action_just_pressed("jump_up") or Input.is_action_just_pressed("jump_right") \
+			or Input.is_action_just_pressed("cursor_right"):
+		adv = 1
+	elif Input.is_action_just_pressed("jump_down") or Input.is_action_just_pressed("jump_left") \
+			or Input.is_action_just_pressed("cursor_left"):
+		adv = -1
+	if adv != 0:
+		_test_cycle_target(adv)
+
+
+# 按 row 降序返回所有垫子 key(start 在前,终点 high 在后)
+func _test_pads_sorted() -> Array:
+	var keys: Array = []
+	for k in tiles.keys():
+		var t = tiles[k]
+		if is_instance_valid(t) and t.kind == "pad":
+			keys.append(k)
+	keys.sort_custom(_test_pad_row_desc)
+	return keys
+
+
+func _test_pad_row_desc(a: String, b: String) -> bool:
+	return int(a.split(",")[1]) > int(b.split(",")[1])
+
+
+func _test_is_player_pad(key: String) -> bool:
 	if player == null or not is_instance_valid(player):
-		return
-	if player.is_airborne():
-		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		var mb := event as InputEventMouseButton
-		_try_aim_click(mb.position)
+		return false
+	return key == "%d,%d" % [player.grid_col, player.grid_row]
 
 
-# 鼠标左键命中弹跳垫顶面 -> 设定落点(角度);点自己脚下的垫 -> 取消瞄准
-func _try_aim_click(mpos: Vector2) -> void:
-	var from := camera.project_ray_origin(mpos)
-	var dir := camera.project_ray_normal(mpos)
-	var hit := pad_at_mouse(from, dir)
-	if hit.is_empty():
+# 循环切换目标垫,跳过脚下垫子
+func _test_cycle_target(delta: int) -> void:
+	var keys := _test_pads_sorted()
+	if keys.size() < 2:
 		return
-	if hit["col"] == player.grid_col and hit["row"] == player.grid_row:
-		player.clear_aim()
+	var n := keys.size()
+	var idx := keys.find(_test_target)
+	if idx < 0:
+		idx = 0 if delta > 0 else n - 1
+	for _i in range(n):
+		idx = (idx + delta) % n
+		if idx < 0:
+			idx += n
+		if not _test_is_player_pad(keys[idx]):
+			break
+	_test_set_target(keys[idx])
+
+
+# 自动选默认目标:朝终点方向(row 更小)最近的垫子;没有则朝起点方向最近
+func _test_auto_target() -> String:
+	if player == null or not is_instance_valid(player):
+		return ""
+	var best := ""
+	var best_d := INF
+	for k in tiles.keys():
+		var t = tiles[k]
+		if not is_instance_valid(t) or t.kind != "pad":
+			continue
+		var r := int(str(k).split(",")[1])
+		if r >= player.grid_row:
+			continue
+		var d: int = player.grid_row - r
+		if d < best_d:
+			best_d = d
+			best = k
+	if best != "":
+		return best
+	best_d = INF
+	for k in tiles.keys():
+		var t = tiles[k]
+		if not is_instance_valid(t) or t.kind != "pad":
+			continue
+		var r := int(str(k).split(",")[1])
+		if r <= player.grid_row:
+			continue
+		var d: int = r - player.grid_row
+		if d < best_d:
+			best_d = d
+			best = k
+	return best
+
+
+# 选中某垫子并让主角瞄准它(仰角自动算)
+func _test_set_target(key: String) -> void:
+	_test_target = key
+	if key == "" or player == null or not is_instance_valid(player):
 		return
-	var pad_tile = tiles["%d,%d" % [hit["col"], hit["row"]]]
-	var target := Vector3(pad_tile.position.x, hit["top"], pad_tile.position.z)
-	player.aim_at(target)
+	var t = tiles.get(key)
+	if t == null or not is_instance_valid(t):
+		return
+	player.aim_at(Vector3(t.position.x, t.top_height(), t.position.z))
 
 
 # ---- 场景搭建 -------------------------------------------------------------
@@ -213,7 +293,10 @@ func _load_level(idx: int) -> void:
 		return
 	equation = EquationScript.new(data["equation"])
 	active_slot = 0
-	hud.set_level(idx + 1)
+	if _endless_mode:
+		hud.set_level_text("无尽 · 第 %d 关" % _endless_level)
+	else:
+		hud.set_level(idx + 1)
 	hud.set_tokens(data["equation"])
 	hud.set_active(0)
 	hud.set_hint(_hint_text())
@@ -225,11 +308,13 @@ func _load_level(idx: int) -> void:
 func _load_test_level(data: Dictionary) -> void:
 	equation = null
 	active_slot = -1
+	_test_target = ""
 	hud.set_level_text("测试模式")
 	hud.setup_test_mode()
 	hud.set_hint(_hint_text())
 	_spawn_test_grid()
 	_spawn_player()
+	_test_set_target(_test_auto_target())
 
 
 func _clear_grid() -> void:
@@ -349,28 +434,19 @@ func test_landing_pad(start: Vector3, dir_h: Vector3, vx: float, vy: float, grav
 	return best
 
 
-# 测试模式:从鼠标位置发出一条射线,命中某个垫子顶面则返回 {col,row,top};没命中返回 {}
-func pad_at_mouse(from: Vector3, dir: Vector3) -> Dictionary:
-	var best_t := INF
-	var best: Dictionary = {}
+# 测试模式:某水平坐标正下方的表面高度(最高的垫子顶面,没有垫子则地面 0)
+# 供阴影投影用:飞行中阴影落到身体正下方,而不是一直钉在起跳垫
+func ground_height_at(x: float, z: float) -> float:
+	var best := 0.0
 	for key in tiles.keys():
 		var t = tiles[key]
-		if not is_instance_valid(t) or t.kind != "pad":
+		if not is_instance_valid(t):
 			continue
-		var top: float = t.top_height()
-		if absf(dir.y) < 0.0001:
-			continue
-		var tt: float = (top - from.y) / dir.y
-		if tt <= 0.0:
-			continue
-		var hit := from + dir * tt
-		var dx: float = hit.x - t.position.x
-		var dz: float = hit.z - t.position.z
+		var dx: float = x - t.position.x
+		var dz: float = z - t.position.z
 		var r: float = t.radius()
-		if dx * dx + dz * dz <= r * r and tt < best_t:
-			best_t = tt
-			var parts := str(key).split(",")
-			best = {"col": int(parts[0]), "row": int(parts[1]), "top": top}
+		if dx * dx + dz * dz <= r * r:
+			best = maxf(best, t.top_height())
 	return best
 
 
@@ -426,6 +502,8 @@ func _on_player_landed(col: int, row: int, content: Dictionary) -> void:
 	if _test_mode:
 		if content.get("goal", false):
 			_win()
+		else:
+			_test_set_target(_test_auto_target())
 		return
 	if content.is_empty():
 		return
@@ -521,6 +599,14 @@ func _on_player_fell_off(_col: int, _row: int) -> void:
 	if _test_mode:
 		_test_fall_off()
 		return
+	if _endless_mode:
+		if _busy:
+			return
+		_busy = true
+		hud.show_wrong("掉下去了～")
+		await get_tree().create_timer(0.7).timeout
+		await _end_game()
+		return
 	if _busy:
 		return
 	_busy = true
@@ -542,6 +628,7 @@ func _test_fall_off() -> void:
 	hud.show_wrong("没有落在弹跳垫上")
 	await get_tree().create_timer(0.7).timeout
 	_reset_player()
+	_test_set_target(_test_auto_target())
 	_busy = false
 
 
@@ -549,6 +636,7 @@ func _test_fall_off() -> void:
 func _manual_reset() -> void:
 	if _test_mode:
 		_reset_player()
+		_test_set_target(_test_auto_target())
 		return
 	if equation == null:
 		return
@@ -561,8 +649,10 @@ func _manual_reset() -> void:
 
 func _hint_text() -> String:
 	if _test_mode:
-		return "鼠标点击弹跳垫设定角度 · 按住 W / A / S / D 蓄力 · 松开跳跃 · R 重置"
+		return "W/S 或 ←/→ 选目标垫 · 空格按住蓄力 · 松开跳跃 · 依次跳过矮/中/高垫到金色终点 · R 重置"
 	var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
+	if _endless_mode:
+		return base + " · 答错或掉落即结束"
 	if _sign_flip_mode:
 		return base + " · 空格 蓄满翻转符号"
 	if _memory_mode:
@@ -572,13 +662,46 @@ func _hint_text() -> String:
 	return base
 
 
+# ---- 无尽模式 --------------------------------------------------------------
+
+func _start_endless() -> void:
+	_endless_mode = true
+	_endless_level = 1
+	levels = [LevelGenerator.generate("mixed", _endless_level)]
+	_load_level(0)
+
+
+func _next_endless() -> void:
+	_endless_level += 1
+	levels.append(LevelGenerator.generate("mixed", _endless_level))
+	_load_level(level_index + 1)
+
+
+# 无尽模式结束:答错/掉落,结算到达关数并刷新最高分,退回模式选择
+func _end_game() -> void:
+	var level := _endless_level
+	var prev_best := Progress.endless_best()
+	Progress.set_endless_best(level)
+	var is_record := level > prev_best
+	_endless_mode = false
+	if is_record:
+		hud.show_endless_over("新纪录！到达第 %d 关" % level)
+	else:
+		hud.show_endless_over("到达第 %d 关 · 最高 %d 关" % [level, Progress.endless_best()])
+	await get_tree().create_timer(2.2).timeout
+	_return_to_mode_select()
+
+
 func _win() -> void:
 	_busy = true
-	Progress.on_level_passed(current_mode, level_index)
+	if not _endless_mode:
+		Progress.on_level_passed(current_mode, level_index)
 	hud.show_win()
 	_spawn_confetti()
 	await get_tree().create_timer(2.0).timeout
-	if level_index + 1 < levels.size():
+	if _endless_mode:
+		_next_endless()
+	elif level_index + 1 < levels.size():
 		_load_level(level_index + 1)
 	else:
 		# 本章(模式)结束:退回章节选择界面
@@ -586,6 +709,10 @@ func _win() -> void:
 
 
 func _wrong() -> void:
+	if _endless_mode:
+		_busy = true
+		await _end_game()
+		return
 	if _sign_flip_mode:
 		# 翻转模式:答错不重置,让玩家继续翻符号/改数(R 可手动重置)
 		hud.show_wrong()

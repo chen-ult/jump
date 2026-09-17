@@ -18,6 +18,18 @@ static func on_level_passed(mode: String, level_index: int) -> void:
 	_save(data)
 
 
+# 无尽模式最高分:到达第几关(取历史最大)
+static func endless_best() -> int:
+	return int(_load().get("endless_best", 0))
+
+
+static func set_endless_best(level: int) -> void:
+	var data := _load()
+	var cur := int(data.get("endless_best", 0))
+	data["endless_best"] = maxi(cur, level)
+	_save(data)
+
+
 static func _load() -> Dictionary:
 	if not FileAccess.file_exists(SAVE_PATH):
 		return {}

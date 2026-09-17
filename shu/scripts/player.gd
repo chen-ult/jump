@@ -16,8 +16,7 @@ const FALL_DURATION := 0.55  # 坠落(下坠+缩小+翻滚)时长
 # 测试模式:鼠标点击弹跳垫设定角度,按住蓄力(力度),松开沿抛体轨迹跳跃
 const TEST_MAX_CHARGE := 1.5   # 蓄满所需秒数
 const TEST_GRAVITY := 8.0      # 抛体重力(越小弧线越平缓)
-const TEST_MAX_SPEED := 6.5    # 满蓄力时的初速度
-const TEST_PERFECT_CHARGE := 0.9  # 该蓄力比例下初速度刚好命中目标垫(0..1)
+const TEST_MAX_SPEED := 6.5    # 满蓄力时的初速度(瞄准按满力计算,蓄满恰好命中)
 
 var grid: Node = null
 var grid_col: int = 1
@@ -159,14 +158,14 @@ func _process(delta: float) -> void:
 func _process_test(delta: float) -> void:
 	match state:
 		State.IDLE:
-			if _aim_active and _any_dir_just_pressed():
+			if _aim_active and Input.is_action_just_pressed("stomp"):
 				state = State.CHARGING
 				charge_time = 0.0
 		State.CHARGING:
 			charge_time += delta
 			_update_squash()
 			_update_preview(clampf(charge_time / TEST_MAX_CHARGE, 0.0, 1.0))
-			if _any_dir_just_released():
+			if Input.is_action_just_released("stomp"):
 				_do_test_jump()
 		State.JUMPING:
 			pass
@@ -175,7 +174,10 @@ func _process_test(delta: float) -> void:
 
 
 func _update_shadow() -> void:
-	_shadow.global_position = Vector3(global_position.x, _ground_y + 0.02, global_position.z)
+	var gy := _ground_y
+	if test_mode and grid != null and grid.has_method("ground_height_at"):
+		gy = grid.ground_height_at(global_position.x, global_position.z)
+	_shadow.global_position = Vector3(global_position.x, gy + 0.02, global_position.z)
 	_charge_ring.position = Vector3(0, 0.06, 0)
 
 
@@ -257,8 +259,9 @@ func aim_at(world_target: Vector3) -> void:
 		clear_aim()
 		return
 	_aim_dir = Vector3(d.x, 0.0, d.z).normalized()
+	rotation.y = atan2(_aim_dir.x, _aim_dir.z)  # 面向瞄准方向
 	var dy := world_target.y - position.y
-	var speed := TEST_PERFECT_CHARGE * TEST_MAX_SPEED
+	var speed := TEST_MAX_SPEED  # 满蓄力恰好命中目标垫
 	_aim_angle = _ballistic_angle(r, dy, speed)
 	_aim_angle_deg = rad_to_deg(_aim_angle)
 	_aim_active = true
@@ -277,8 +280,11 @@ func _ballistic_angle(r: float, dy: float, speed: float) -> float:
 	var a := TEST_GRAVITY * r * r / (2.0 * speed * speed)
 	var disc := r * r - 4.0 * a * (dy + a)
 	if disc < 0.0:
-		# 目标超出满蓄力射程:退化为比视线更陡的高抛角(预览会显示落不到)
-		return atan2(dy, r) + 0.7
+		# 目标超出满蓄力射程:取"最远水平距离"仰角(预览会显示落不到,红色标记)
+		var reach := speed * speed - 2.0 * TEST_GRAVITY * dy
+		if reach <= 0.0:
+			return PI * 0.5  # 连高度都够不到,垂直向上
+		return atan(speed / sqrt(reach))
 	var tan_t := (r + sqrt(disc)) / (2.0 * a)
 	return atan(tan_t)
 
@@ -421,7 +427,8 @@ func _refresh_aim_visual() -> void:
 		return
 	var cos_a := cos(_aim_angle)
 	var sin_a := sin(_aim_angle)
-	var launch := Vector3(_aim_dir.x * cos_a, sin_a, _aim_dir.z * cos_a)
+	# 世界方向转局部:抵消 player 的旋转,让瞄准线始终指向真正的目标方向
+	var launch := to_local(global_position + Vector3(_aim_dir.x * cos_a, sin_a, _aim_dir.z * cos_a))
 	# 发射方向线
 	var ray := PackedVector3Array()
 	ray.append(Vector3.ZERO)
@@ -434,7 +441,7 @@ func _refresh_aim_visual() -> void:
 	var n := 14
 	for i in range(n + 1):
 		var a := _aim_angle * (float(i) / float(n))
-		arc.append(Vector3(_aim_dir.x * cos(a), sin(a), _aim_dir.z * cos(a)) * radius)
+		arc.append(to_local(global_position + Vector3(_aim_dir.x * cos(a), sin(a), _aim_dir.z * cos(a)) * radius))
 	_draw_line(_angle_arc, arc, Color("#ff7aa2"))
 	_angle_arc.visible = true
 	_angle_label.text = "%.0f°" % _aim_angle_deg
@@ -458,11 +465,11 @@ func _update_preview(power: float) -> void:
 		dur = 2.0 * vy / TEST_GRAVITY
 		if dur <= 0.0:
 			dur = 0.3
-		end_local = _trajectory_points(v0, dur)["end"]
+		end_local = to_local(global_position + _trajectory_points(v0, dur)["end"])
 	else:
 		dur = land["time"]
-		end_local = land["point"] - position
-	var ctrl_local := v0 * (dur * 0.5)
+		end_local = to_local(land["point"])
+	var ctrl_local := to_local(global_position + v0 * (dur * 0.5))
 	var pts := PackedVector3Array()
 	var n := 24
 	for i in range(n + 1):
@@ -495,14 +502,6 @@ func _bezier_point(k: float, a: Vector3, b: Vector3, c: Vector3) -> Vector3:
 	return a * ik * ik + b * 2.0 * ik * k + c * k * k
 
 
-func _any_dir_just_pressed() -> bool:
-	return Input.is_action_just_pressed("jump_up") or Input.is_action_just_pressed("jump_down") \
-		or Input.is_action_just_pressed("jump_left") or Input.is_action_just_pressed("jump_right")
-
-
-func _any_dir_just_released() -> bool:
-	return Input.is_action_just_released("jump_up") or Input.is_action_just_released("jump_down") \
-		or Input.is_action_just_released("jump_left") or Input.is_action_just_released("jump_right")
 
 
 # ---- 普通模式:格子跳 / 蓄力翻转 -------------------------------------------

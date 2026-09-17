@@ -18,6 +18,7 @@ const MODES := [
 	{"id": "sign", "name": "翻转符号"},
 	{"id": "memory", "name": "记忆翻牌"},
 	{"id": "test", "name": "测试模式"},
+	{"id": "endless", "name": "无尽模式"},
 ]
 
 var _root: Control
@@ -103,7 +104,7 @@ func _build_mode_page() -> void:
 	grid.add_theme_constant_override("h_separation", 28)
 	grid.add_theme_constant_override("v_separation", 20)
 	for m in MODES:
-		var btn := _make_button(m["name"], Color("#ff7aa2"))
+		var btn := _make_button(m["name"], Color("#7fb0d1") if m["id"] == "endless" else Color("#ff7aa2"))
 		btn.pressed.connect(_on_mode_pressed.bind(m["id"]))
 		grid.add_child(btn)
 	var cgrid := CenterContainer.new()
@@ -251,6 +252,9 @@ func _on_start_pressed() -> void:
 
 
 func _on_mode_pressed(mode: String) -> void:
+	if mode == "endless":
+		start_game.emit(mode, 0)  # 无尽模式直接开始,不走选关页
+		return
 	_selected_mode = mode
 	_populate_levels(mode)
 	_show_levels()

@@ -38,7 +38,7 @@ func _ready() -> void:
 func _build_ui() -> void:
 	_root = Control.new()
 	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE  # 让鼠标点击穿透到 3D 场景(测试模式选落点)
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE  # 让 HUD 不拦截鼠标(点击穿透)
 	add_child(_root)
 
 	# 左上角:关卡标签
@@ -377,6 +377,11 @@ func _restore_borders() -> void:
 
 func show_win() -> void:
 	_show_banner("🎉 太棒了！", 2.0)
+
+
+# 无尽模式结算:显示到达第几关 / 新纪录
+func show_endless_over(txt: String) -> void:
+	_show_banner(txt, 2.2)
 
 
 func _show_banner(txt: String, dur: float) -> void:
