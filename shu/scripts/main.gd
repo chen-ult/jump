@@ -11,6 +11,7 @@ const Solvability := preload("res://scripts/solvability.gd")
 const LevelGenerator := preload("res://scripts/level_generator.gd")
 
 const SPACING := 2.2
+const TEST_SPACING := 2.6  # 测试模式弹跳垫之间的间距(略大于普通格子)
 const TILE_HEIGHT := 0.55  # 棋子圆柱的高度,顶面即主角的站立面
 const PLAYER_RADIUS := 0.2  # 主角"碰撞"半径(棋子底盘),落地判定时身体碰垫即算落上
 
@@ -30,7 +31,6 @@ var _busy: bool = false
 var _memory_mode: bool = false
 var _sign_flip_mode: bool = false
 var _test_mode: bool = false
-var _test_target: String = ""
 var _endless_mode: bool = false
 var _endless_level: int = 1
 var _last_land_slot: int = -1
@@ -106,9 +106,7 @@ func _process(_delta: float) -> void:
 		return
 	if player and is_instance_valid(player) and player.is_falling():
 		return  # 坠落动画中,冻结光标/重置输入
-	if _test_mode:
-		_test_handle_target_input()
-	else:
+	if not _test_mode:
 		if Input.is_action_just_pressed("cursor_left"):
 			_move_cursor(-1)
 		elif Input.is_action_just_pressed("cursor_right"):
@@ -124,105 +122,6 @@ func _update_charge_ui() -> void:
 			hud.set_charge_power(player.charge_progress())
 		else:
 			hud.set_charge(player.charge_progress(), player.charge_tiles(), player.is_stomping())
-
-
-# 测试模式:方向键在候选垫子间循环选目标(跳过脚下垫子),adv>0 朝终点
-func _test_handle_target_input() -> void:
-	if player == null or not is_instance_valid(player) or player.is_airborne():
-		return
-	var adv := 0
-	if Input.is_action_just_pressed("jump_up") or Input.is_action_just_pressed("jump_right") \
-			or Input.is_action_just_pressed("cursor_right"):
-		adv = 1
-	elif Input.is_action_just_pressed("jump_down") or Input.is_action_just_pressed("jump_left") \
-			or Input.is_action_just_pressed("cursor_left"):
-		adv = -1
-	if adv != 0:
-		_test_cycle_target(adv)
-
-
-# 按 row 降序返回所有垫子 key(start 在前,终点 high 在后)
-func _test_pads_sorted() -> Array:
-	var keys: Array = []
-	for k in tiles.keys():
-		var t = tiles[k]
-		if is_instance_valid(t) and t.kind == "pad":
-			keys.append(k)
-	keys.sort_custom(_test_pad_row_desc)
-	return keys
-
-
-func _test_pad_row_desc(a: String, b: String) -> bool:
-	return int(a.split(",")[1]) > int(b.split(",")[1])
-
-
-func _test_is_player_pad(key: String) -> bool:
-	if player == null or not is_instance_valid(player):
-		return false
-	return key == "%d,%d" % [player.grid_col, player.grid_row]
-
-
-# 循环切换目标垫,跳过脚下垫子
-func _test_cycle_target(delta: int) -> void:
-	var keys := _test_pads_sorted()
-	if keys.size() < 2:
-		return
-	var n := keys.size()
-	var idx := keys.find(_test_target)
-	if idx < 0:
-		idx = 0 if delta > 0 else n - 1
-	for _i in range(n):
-		idx = (idx + delta) % n
-		if idx < 0:
-			idx += n
-		if not _test_is_player_pad(keys[idx]):
-			break
-	_test_set_target(keys[idx])
-
-
-# 自动选默认目标:朝终点方向(row 更小)最近的垫子;没有则朝起点方向最近
-func _test_auto_target() -> String:
-	if player == null or not is_instance_valid(player):
-		return ""
-	var best := ""
-	var best_d := INF
-	for k in tiles.keys():
-		var t = tiles[k]
-		if not is_instance_valid(t) or t.kind != "pad":
-			continue
-		var r := int(str(k).split(",")[1])
-		if r >= player.grid_row:
-			continue
-		var d: int = player.grid_row - r
-		if d < best_d:
-			best_d = d
-			best = k
-	if best != "":
-		return best
-	best_d = INF
-	for k in tiles.keys():
-		var t = tiles[k]
-		if not is_instance_valid(t) or t.kind != "pad":
-			continue
-		var r := int(str(k).split(",")[1])
-		if r <= player.grid_row:
-			continue
-		var d: int = r - player.grid_row
-		if d < best_d:
-			best_d = d
-			best = k
-	return best
-
-
-# 选中某垫子并让主角瞄准它(仰角自动算)
-func _test_set_target(key: String) -> void:
-	_test_target = key
-	if key == "" or player == null or not is_instance_valid(player):
-		return
-	var t = tiles.get(key)
-	if t == null or not is_instance_valid(t):
-		return
-	player.aim_at(Vector3(t.position.x, t.top_height(), t.position.z))
 
 
 # ---- 场景搭建 -------------------------------------------------------------
@@ -305,16 +204,14 @@ func _load_level(idx: int) -> void:
 
 
 # 测试模式:无等式,铺设起点垫 + 大中小三个跳跃垫,交给连续距离跳
-func _load_test_level(data: Dictionary) -> void:
+func _load_test_level(_data: Dictionary) -> void:
 	equation = null
 	active_slot = -1
-	_test_target = ""
 	hud.set_level_text("测试模式")
 	hud.setup_test_mode()
 	hud.set_hint(_hint_text())
 	_spawn_test_grid()
 	_spawn_player()
-	_test_set_target(_test_auto_target())
 
 
 func _clear_grid() -> void:
@@ -380,7 +277,7 @@ func _spawn_grid() -> void:
 	tiles["%d,%d" % [sc, sr]] = spad
 
 
-# 测试模式:起点垫 + 矮中高三个跳跃垫(最后一个为终点)
+# 测试模式:起点垫 + 大中小三个跳跃垫(最后一个为终点),垫子沿 -Z 以更大的间距排布
 func _spawn_test_grid() -> void:
 	var data: Dictionary = levels[level_index]
 	var start: Dictionary = data["start"]
@@ -389,65 +286,41 @@ func _spawn_test_grid() -> void:
 	spad.position = tile_base_world(start["c"], start["r"])
 	spad.set_start_pad()
 	tiles["%d,%d" % [start["c"], start["r"]]] = spad
-	for p in data.get("pads", []):
+	var base := tile_base_world(start["c"], start["r"])
+	var pads: Array = data.get("pads", [])
+	for i in pads.size():
+		var p = pads[i]
 		var t = TileScene.instantiate()
 		add_child(t)
-		t.position = tile_base_world(p["c"], p["r"])
-		t.set_test_pad(p["height"], p["goal"])
+		t.position = base - Vector3(0, 0, TEST_SPACING * (i + 1))
+		t.set_test_pad(p["size"], p["goal"])
 		tiles["%d,%d" % [p["c"], p["r"]]] = t
 
 
-# 测试模式:给定发射起点/水平方向/水平速度/竖直速度,求落点所在垫子
-# 返回 {col,row,point,time,content};没落在任何垫上返回 {}
-func test_landing_pad(start: Vector3, dir_h: Vector3, vx: float, vy: float, gravity: float) -> Dictionary:
-	var best_t := INF
-	var best: Dictionary = {}
+# 测试模式:某水平坐标落在哪个垫子上(半径内),返回 {col,row,content};没命中返回 {}
+func test_pad_at(x: float, z: float) -> Dictionary:
+	var best_d := INF
+	var best_key := ""
 	for key in tiles.keys():
 		var t = tiles[key]
 		if not is_instance_valid(t) or t.kind != "pad":
 			continue
-		var top: float = t.top_height()
-		var dy: float = top - start.y
-		var vy2: float = vy * vy
-		if vy2 < 2.0 * gravity * dy:
-			continue  # 这个速度到不了该垫顶面高度
-		var tt: float
-		if absf(dy) < 0.001:
-			tt = 2.0 * vy / gravity
-		else:
-			tt = (vy + sqrt(vy2 - 2.0 * gravity * dy)) / gravity
-		var land := start + Vector3(dir_h.x * vx * tt, 0.0, dir_h.z * vx * tt)
-		land.y = top
-		var dx: float = land.x - t.position.x
-		var dz: float = land.z - t.position.z
-		var reach: float = t.radius() + PLAYER_RADIUS
-		if dx * dx + dz * dz <= reach * reach and tt < best_t:
-			best_t = tt
-			var parts := str(key).split(",")
-			best = {
-				"col": int(parts[0]),
-				"row": int(parts[1]),
-				"point": land,
-				"time": tt,
-				"content": {"type": "pad", "goal": t.is_goal()},
-			}
-	return best
-
-
-# 测试模式:某水平坐标正下方的表面高度(最高的垫子顶面,没有垫子则地面 0)
-# 供阴影投影用:飞行中阴影落到身体正下方,而不是一直钉在起跳垫
-func ground_height_at(x: float, z: float) -> float:
-	var best := 0.0
-	for key in tiles.keys():
-		var t = tiles[key]
-		if not is_instance_valid(t):
-			continue
 		var dx: float = x - t.position.x
 		var dz: float = z - t.position.z
-		var r: float = t.radius()
-		if dx * dx + dz * dz <= r * r:
-			best = maxf(best, t.top_height())
-	return best
+		var reach: float = t.radius() + PLAYER_RADIUS
+		var d2: float = dx * dx + dz * dz
+		if d2 <= reach * reach and d2 < best_d:
+			best_d = d2
+			best_key = key
+	if best_key == "":
+		return {}
+	var t2 = tiles[best_key]
+	var parts := str(best_key).split(",")
+	return {
+		"col": int(parts[0]),
+		"row": int(parts[1]),
+		"content": {"type": "pad", "goal": t2.is_goal()},
+	}
 
 
 func _spawn_player() -> void:
@@ -468,6 +341,11 @@ func _spawn_player() -> void:
 # 格子"站立点"的世界坐标(圆柱顶面):主角位置与跳跃落点都用它
 func grid_to_world(col: int, row: int) -> Vector3:
 	return Vector3((col - 1) * SPACING, TILE_HEIGHT, (row - 1) * SPACING)
+
+
+# 测试模式:相邻弹跳垫的间距(弧线高度/时长按"跳过几个垫"缩放用)
+func test_spacing() -> float:
+	return TEST_SPACING
 
 
 # 格子"基座"的世界坐标(底面贴地):只在铺格子时用
@@ -502,8 +380,6 @@ func _on_player_landed(col: int, row: int, content: Dictionary) -> void:
 	if _test_mode:
 		if content.get("goal", false):
 			_win()
-		else:
-			_test_set_target(_test_auto_target())
 		return
 	if content.is_empty():
 		return
@@ -628,7 +504,6 @@ func _test_fall_off() -> void:
 	hud.show_wrong("没有落在弹跳垫上")
 	await get_tree().create_timer(0.7).timeout
 	_reset_player()
-	_test_set_target(_test_auto_target())
 	_busy = false
 
 
@@ -636,7 +511,6 @@ func _test_fall_off() -> void:
 func _manual_reset() -> void:
 	if _test_mode:
 		_reset_player()
-		_test_set_target(_test_auto_target())
 		return
 	if equation == null:
 		return
@@ -649,7 +523,7 @@ func _manual_reset() -> void:
 
 func _hint_text() -> String:
 	if _test_mode:
-		return "W/S 或 ←/→ 选目标垫 · 空格按住蓄力 · 松开跳跃 · 依次跳过矮/中/高垫到金色终点 · R 重置"
+		return "W A S D 按住蓄力 · 蓄力时间决定距离 · 松开跳出 · 依次跳上大/中/小垫到金色终点 · R 重置"
 	var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
 	if _endless_mode:
 		return base + " · 答错或掉落即结束"

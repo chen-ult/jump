@@ -23,10 +23,10 @@ var _goal: bool = false
 const FLOAT_LABEL_Y := 2.5
 const FLAT_LABEL_Y := 0.59
 
-# 测试模式:默认垫半径 + 矮中高三种垫顶面高度
+# 测试模式:默认垫半径 + 大中小三种垫半径
 const BASE_RADIUS := 0.85
 const BASE_HEIGHT := 0.55
-const TEST_PAD_HEIGHTS := {"low": 0.85, "medium": 1.25, "high": 1.65}
+const TEST_PAD_SIZES := {"large": 1.3, "medium": 0.9, "small": 0.6}
 
 
 func _ready() -> void:
@@ -95,17 +95,18 @@ func _color_for() -> Color:
 	return Style.tile_color(n)
 
 
-# 测试模式垫子:按高度设圆柱高度/颜色,goal 为终点垫(金色),不显示数字
-func set_test_pad(height: String, goal: bool) -> void:
+# 测试模式垫子:按大小设半径/颜色,goal 为终点垫(金色),高度统一,不显示数字
+func set_test_pad(size: String, goal: bool) -> void:
 	kind = "pad"
 	value = 0
 	_goal = goal
-	_radius = BASE_RADIUS
-	var h: float = TEST_PAD_HEIGHTS.get(height, 0.85)
-	_top_y = h
-	_base.scale = Vector3(1.0, h / BASE_HEIGHT, 1.0)
-	_base.position.y = h * 0.5
-	_base.material_override = Style.toon_material(_test_pad_color(height, goal), 0.4)
+	var r: float = TEST_PAD_SIZES.get(size, BASE_RADIUS)
+	_radius = r
+	_top_y = BASE_HEIGHT
+	var s := r / BASE_RADIUS
+	_base.scale = Vector3(s, 1.0, s)
+	_base.position.y = BASE_HEIGHT * 0.5
+	_base.material_override = Style.toon_material(_test_pad_color(size, goal), 0.4)
 	_label.visible = false
 
 
@@ -135,15 +136,15 @@ func is_goal() -> bool:
 	return _goal
 
 
-func _test_pad_color(height: String, goal: bool) -> Color:
+func _test_pad_color(size: String, goal: bool) -> Color:
 	if goal:
 		return Color("#ffd166")  # 金色终点垫
-	match height:
-		"low":
+	match size:
+		"large":
 			return Color("#7fd1b9")
 		"medium":
 			return Color("#7fb0d1")
-		"high":
+		"small":
 			return Color("#c9a0e6")
 	return Color("#7fb0d1")
 

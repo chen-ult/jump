@@ -93,18 +93,18 @@ static func _parse_start(s) -> Dictionary:
 	return {"c": c, "r": r}
 
 
-# 测试模式:起点垫上方沿行号递减方向排开矮中高三个跳跃垫,最后一个为终点垫
+# 测试模式:起点垫上方沿行号递减方向排开大中小三个跳跃垫,最后一个为终点垫
 static func _parse_test_pads(raw: Dictionary, start: Dictionary) -> Array:
-	var heights: Array = raw.get("pads", [])
+	var sizes: Array = raw.get("pads", [])
 	var out: Array = []
 	var sc: int = int(start.get("c", 1))
 	var sr: int = int(start.get("r", 3))
-	for i in heights.size():
+	for i in sizes.size():
 		out.append({
-			"height": str(heights[i]),
+			"size": str(sizes[i]),
 			"c": sc,
 			"r": sr - (i + 1),
-			"goal": i == heights.size() - 1,
+			"goal": i == sizes.size() - 1,
 		})
 	return out
 

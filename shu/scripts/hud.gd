@@ -245,14 +245,14 @@ func set_charge(progress: float, tiles: int, stomp: bool = false) -> void:
 	_charge_label.add_theme_color_override("font_color", Color("#b07a2f") if full else Color("#5a4a66"))
 
 
-# 测试模式:蓄力条显示力度百分比
+# 测试模式:蓄力条显示距离百分比
 func set_charge_power(progress: float) -> void:
 	if progress <= 0.0:
 		_charge_root.visible = false
 		return
 	_charge_root.visible = true
 	_charge_bar.value = progress
-	_charge_label.text = "力度 %d%%" % int(progress * 100.0)
+	_charge_label.text = "距离 %d%%" % int(progress * 100.0)
 	var full: bool = progress >= 1.0
 	_fill_sb.bg_color = Color("#ffd166") if full else Color("#ff7aa2")
 	_charge_label.add_theme_color_override("font_color", Color("#b07a2f") if full else Color("#5a4a66"))
