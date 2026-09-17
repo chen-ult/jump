@@ -269,6 +269,7 @@ func set_level_text(txt: String) -> void:
 func set_hint(txt: String) -> void:
 	if _hint_label:
 		_hint_label.text = txt
+		_hint_label.visible = txt != ""
 
 
 # 测试模式:隐藏等式框(没有等式),提示交给 set_hint

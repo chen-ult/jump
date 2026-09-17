@@ -110,6 +110,16 @@ func set_test_pad(size: String, goal: bool) -> void:
 	_label.visible = false
 
 
+# 教学 tier 3:给数字/运算符格按大小缩放(保留数字标签显示,区别于 set_test_pad 隐藏标签)
+func set_size(size: String) -> void:
+	var r: float = TEST_PAD_SIZES.get(size, BASE_RADIUS)
+	_radius = r
+	_top_y = BASE_HEIGHT
+	var s := r / BASE_RADIUS
+	_base.scale = Vector3(s, 1.0, s)
+	_base.position.y = BASE_HEIGHT * 0.5
+
+
 # 测试模式起点垫:默认大小/高度 + 起点色
 func set_start_pad() -> void:
 	kind = "pad"

@@ -24,6 +24,8 @@ var charge_dir: Vector2i = Vector2i.ZERO
 var charge_time: float = 0.0
 var _ground_y: float = 0.0  # 站立面高度(圆柱顶面),阴影贴在这里
 var test_mode: bool = false
+var continuous_charge: bool = false  # tier>=1:蓄力时间决定距离(不再显示格数)
+var precise_landing: bool = false    # tier>=2:精准落点(不吸附垫中心)
 
 @onready var _body: Node3D = $Body
 @onready var _model: Node3D = $Body/Model
@@ -101,12 +103,18 @@ func set_test_mode(b: bool) -> void:
 	test_mode = b
 
 
+# 教学三级难度:1=连续距离跳(吸附落点),2=精准落点,3=由 main 在格子侧随机大小
+func set_jump_tier(t: int) -> void:
+	continuous_charge = t >= 1
+	precise_landing = t >= 2
+
+
 func _process(delta: float) -> void:
 	_update_shadow()
 	if grid and grid.is_busy():
 		return
-	if test_mode:
-		_process_test(delta)
+	if test_mode or continuous_charge:
+		_process_distance(delta)
 		return
 
 	match state:
@@ -135,8 +143,8 @@ func _process(delta: float) -> void:
 			pass
 
 
-# 测试模式:按住方向键蓄力(蓄力时间决定距离),松开沿该方向跳出
-func _process_test(delta: float) -> void:
+# 连续距离跳(测试模式 + 教学 tier>=1):按住方向键蓄力(蓄力时间决定距离),松开沿该方向跳出
+func _process_distance(delta: float) -> void:
 	match state:
 		State.IDLE:
 			var d := _held_dir()
@@ -148,7 +156,7 @@ func _process_test(delta: float) -> void:
 			charge_time += delta
 			_update_squash()
 			if _just_released(charge_dir):
-				_do_test_jump()
+				_do_distance_jump()
 		State.JUMPING:
 			pass
 		State.FALLING:
@@ -179,7 +187,7 @@ func _charge_distance() -> int:
 
 # 当前蓄力对应的最长时长(测试模式用更长的蓄满时间)
 func _max_charge() -> float:
-	return TEST_MAX_CHARGE if test_mode else MAX_CHARGE
+	return TEST_MAX_CHARGE if (test_mode or continuous_charge) else MAX_CHARGE
 
 
 # 供 HUD 读取:当前蓄力进度(0..1),非蓄力时为 0
@@ -228,46 +236,59 @@ func _do_jump() -> void:
 	_jump_arc(position, grid.grid_to_world(target.x, target.y), dist)
 
 
-# ---- 测试模式:方向 + 蓄力 -> 距离 -----------------------------------------
+# ---- 连续距离跳(测试模式 + 教学 tier>=1):方向 + 蓄力 -> 距离 ---------------
 
-# 蓄力时间 -> 跳跃距离(满蓄力刚好跳过 3 个垫子到终点)
-func _test_distance() -> float:
-	var spacing: float = grid.test_spacing()
+# 蓄力时间 -> 跳跃距离(满蓄力跳过 3 个垫子/格子)
+func _distance() -> float:
+	var spacing: float = grid.jump_spacing()
 	return clampf(charge_time / TEST_MAX_CHARGE, 0.0, 1.0) * spacing * 3.0
 
 
-# 测试模式跳跃:按蓄力算距离,沿 charge_dir 方向跳出;落点有垫则站上去,没有则坠落
-func _do_test_jump() -> void:
+# 连续距离跳:按蓄力算距离,沿 charge_dir 方向跳出。
+# 精准模式(precise_landing):落点精确判定,落在垫子半径内才站上;否则坠空。
+# 吸附模式:落点吸附到最近垫中心(宽容,不要求精准)。
+func _do_distance_jump() -> void:
 	_charge_ring.visible = false
 	_body.scale = Vector3.ONE
 	var from := Vector2i(grid_col, grid_row)
-	var dist := _test_distance()
+	var dist := _distance()
 	var dir3 := Vector3(charge_dir.x, 0.0, charge_dir.y)
 	var land_end := position + dir3 * dist
-	var land: Dictionary = grid.test_pad_at(land_end.x, land_end.z)
 	state = State.JUMPING
-	if land.is_empty():
-		_test_jump_miss(from, position, land_end, dist)
-	else:
+	if precise_landing:
+		var land: Dictionary = grid.pad_at(land_end.x, land_end.z)
+		if land.is_empty():
+			_distance_jump_miss(from, position, land_end)
+			return
 		grid_col = int(land["col"])
 		grid_row = int(land["row"])
-		_test_jump_arc(position, land_end, land["content"], dist)
+		_distance_jump_arc(position, land_end, land["content"])
+	else:
+		var snap: Dictionary = grid.nearest_pad(land_end.x, land_end.z, grid.snap_tolerance())
+		if snap.is_empty():
+			_distance_jump_miss(from, position, land_end)
+			return
+		grid_col = int(snap["col"])
+		grid_row = int(snap["row"])
+		_distance_jump_arc(position, grid.grid_to_world(grid_col, grid_row), snap["content"])
 
 
-# 落在垫子上:跳到精确落点(不吸附到垫中心),落地后发 landed
-func _test_jump_arc(start: Vector3, end: Vector3, content: Dictionary, dist: float) -> void:
-	var tiles: float = dist / grid.test_spacing()
-	var mid := (start + end) * 0.5 + Vector3(0, JUMP_HEIGHT * tiles, 0)
+# 跳到落点:精准落点直接落在 land_end,吸附落点落在垫中心;落地后发 landed
+func _distance_jump_arc(start: Vector3, end: Vector3, content: Dictionary) -> void:
+	var horiz := Vector3(end.x - start.x, 0.0, end.z - start.z)
+	var tiles: float = horiz.length() / grid.jump_spacing()
+	var mid := (start + end) * 0.5 + Vector3(0, JUMP_HEIGHT * maxf(tiles, 0.6), 0)
 	_body.scale = Vector3(0.9, 1.15, 0.9)
 	var t := create_tween()
 	t.tween_method(_jump_pos.bind(start, mid, end), 0.0, 1.0, JUMP_DURATION * maxf(tiles, 0.6))
-	t.tween_callback(_on_test_land.bind(content))
+	t.tween_callback(_on_land.bind(content))
 
 
 # 落在空处:先跳到那个点(和正常跳一样的弧线),再坠落(下坠+缩小+翻滚),发 fell_off
-func _test_jump_miss(from: Vector2i, start: Vector3, end: Vector3, dist: float) -> void:
-	var tiles: float = dist / grid.test_spacing()
-	var mid := (start + end) * 0.5 + Vector3(0, JUMP_HEIGHT * tiles, 0)
+func _distance_jump_miss(from: Vector2i, start: Vector3, end: Vector3) -> void:
+	var horiz := Vector3(end.x - start.x, 0.0, end.z - start.z)
+	var tiles: float = horiz.length() / grid.jump_spacing()
+	var mid := (start + end) * 0.5 + Vector3(0, JUMP_HEIGHT * maxf(tiles, 0.6), 0)
 	_body.scale = Vector3(0.9, 1.15, 0.9)
 	var jump := create_tween()
 	jump.tween_method(_jump_pos.bind(start, mid, end), 0.0, 1.0, JUMP_DURATION * maxf(tiles, 0.6))
@@ -279,16 +300,6 @@ func _test_jump_miss(from: Vector2i, start: Vector3, end: Vector3, dist: float) 
 	fall.parallel().tween_property(_body, "rotation:y", _body.rotation.y + TAU, FALL_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await fall.finished
 	fell_off.emit(from.x, from.y)
-
-
-# 测试模式落地:停在精确落点(不吸附到垫中心)
-func _on_test_land(content: Dictionary) -> void:
-	state = State.IDLE
-	_body.scale = Vector3(1.35, 0.6, 1.35)
-	var t := create_tween()
-	t.tween_property(_body, "scale", Vector3.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_ground_y = position.y
-	landed.emit(grid_col, grid_row, content)
 
 
 # ---- 普通模式:格子跳 / 蓄力翻转 -------------------------------------------
@@ -336,7 +347,7 @@ func _jump_arc(start: Vector3, end: Vector3, tiles: int) -> void:
 	_body.scale = Vector3(0.9, 1.15, 0.9)
 	var t := create_tween()
 	t.tween_method(_jump_pos.bind(start, mid, end), 0.0, 1.0, JUMP_DURATION * tiles)
-	t.tween_callback(_on_land)
+	t.tween_callback(_on_land.bind(grid.cell_content_at(grid_col, grid_row)))
 
 
 func _jump_pos(k: float, a: Vector3, b: Vector3, c: Vector3) -> void:
@@ -344,12 +355,13 @@ func _jump_pos(k: float, a: Vector3, b: Vector3, c: Vector3) -> void:
 	position = a * ik * ik + b * 2.0 * ik * k + c * k * k
 
 
-func _on_land() -> void:
+func _on_land(content: Dictionary) -> void:
 	state = State.IDLE
 	_body.scale = Vector3(1.35, 0.6, 1.35)
 	var t := create_tween()
 	t.tween_property(_body, "scale", Vector3.ONE, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	landed.emit(grid_col, grid_row, grid.cell_content_at(grid_col, grid_row))
+	_ground_y = position.y
+	landed.emit(grid_col, grid_row, content)
 
 
 func _cancel_boing() -> void:

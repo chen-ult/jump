@@ -14,6 +14,8 @@ const SPACING := 2.2
 const TEST_SPACING := 2.6  # 测试模式弹跳垫之间的间距(略大于普通格子)
 const TILE_HEIGHT := 0.55  # 棋子圆柱的高度,顶面即主角的站立面
 const PLAYER_RADIUS := 0.2  # 主角"碰撞"半径(棋子底盘),落地判定时身体碰垫即算落上
+const PAD_SIZES := ["large", "medium", "small"]  # 教学 tier 3 随机分布的大中小档位
+const SNAP_TOLERANCE := SPACING * 0.8  # tier 1 吸附落点容差(宽容,允许略微偏离)
 
 var equation
 var active_slot: int = -1
@@ -31,6 +33,7 @@ var _busy: bool = false
 var _memory_mode: bool = false
 var _sign_flip_mode: bool = false
 var _test_mode: bool = false
+var _tier: int = 0  # 教学三级难度档位(0=经典离散跳,1=连续距离跳,2=精准落点,3=变尺寸)
 var _endless_mode: bool = false
 var _endless_level: int = 1
 var _last_land_slot: int = -1
@@ -118,7 +121,7 @@ func _process(_delta: float) -> void:
 
 func _update_charge_ui() -> void:
 	if player and is_instance_valid(player):
-		if _test_mode:
+		if _test_mode or _tier >= 1:
 			hud.set_charge_power(player.charge_progress())
 		else:
 			hud.set_charge(player.charge_progress(), player.charge_tiles(), player.is_stomping())
@@ -178,6 +181,7 @@ func _load_level(idx: int) -> void:
 	_memory_mode = bool(data.get("memory", false))
 	_sign_flip_mode = bool(data.get("sign_flip", false))
 	_test_mode = bool(data.get("test", false))
+	_tier = int(data.get("tier", 0))
 	if _test_mode:
 		_load_test_level(data)
 		return
@@ -261,6 +265,8 @@ func _spawn_grid() -> void:
 		add_child(tile)
 		tile.position = tile_base_world(c, r)
 		tile.set_content(entry["type"], entry["value"])
+		if _tier >= 3:
+			tile.set_size(_random_pad_size())
 		if _memory_mode:
 			tile.set_memory(true)
 		tiles["%d,%d" % [c, r]] = tile
@@ -275,6 +281,11 @@ func _spawn_grid() -> void:
 	if _memory_mode:
 		spad.set_memory(true)
 	tiles["%d,%d" % [sc, sr]] = spad
+
+
+# 教学 tier 3:随机返回一个大/中/小档位
+func _random_pad_size() -> String:
+	return PAD_SIZES[randi() % PAD_SIZES.size()]
 
 
 # 测试模式:起点垫 + 大中小三个跳跃垫(最后一个为终点),垫子沿 -Z 以更大的间距排布
@@ -297,13 +308,13 @@ func _spawn_test_grid() -> void:
 		tiles["%d,%d" % [p["c"], p["r"]]] = t
 
 
-# 测试模式:某水平坐标落在哪个垫子上(半径内),返回 {col,row,content};没命中返回 {}
-func test_pad_at(x: float, z: float) -> Dictionary:
+# 某水平坐标落在哪个垫/格子上(半径内),返回 {col,row,content};没命中返回 {}
+func pad_at(x: float, z: float) -> Dictionary:
 	var best_d := INF
 	var best_key := ""
 	for key in tiles.keys():
 		var t = tiles[key]
-		if not is_instance_valid(t) or t.kind != "pad":
+		if not is_instance_valid(t):
 			continue
 		var dx: float = x - t.position.x
 		var dz: float = z - t.position.z
@@ -319,7 +330,32 @@ func test_pad_at(x: float, z: float) -> Dictionary:
 	return {
 		"col": int(parts[0]),
 		"row": int(parts[1]),
-		"content": {"type": "pad", "goal": t2.is_goal()},
+		"content": {"type": t2.kind, "value": t2.value, "goal": t2.is_goal()},
+	}
+
+
+# 距离 (x,z) 最近且落在容差内的垫/格子(教学 tier 1 吸附落点用);没命中返回 {}
+func nearest_pad(x: float, z: float, tolerance: float) -> Dictionary:
+	var best_d := INF
+	var best_key := ""
+	for key in tiles.keys():
+		var t = tiles[key]
+		if not is_instance_valid(t):
+			continue
+		var dx: float = x - t.position.x
+		var dz: float = z - t.position.z
+		var d: float = sqrt(dx * dx + dz * dz)
+		if d < best_d:
+			best_d = d
+			best_key = key
+	if best_key == "" or best_d > tolerance:
+		return {}
+	var t2 = tiles[best_key]
+	var parts := str(best_key).split(",")
+	return {
+		"col": int(parts[0]),
+		"row": int(parts[1]),
+		"content": {"type": t2.kind, "value": t2.value, "goal": t2.is_goal()},
 	}
 
 
@@ -329,6 +365,7 @@ func _spawn_player() -> void:
 	var start: Dictionary = levels[level_index]["start"]
 	player.setup(self, start["c"], start["r"])
 	player.set_test_mode(_test_mode)
+	player.set_jump_tier(3 if _test_mode else _tier)
 	player.face_toward(camera.global_position)
 	player.landed.connect(_on_player_landed)
 	player.departed.connect(_on_player_departed)
@@ -343,9 +380,14 @@ func grid_to_world(col: int, row: int) -> Vector3:
 	return Vector3((col - 1) * SPACING, TILE_HEIGHT, (row - 1) * SPACING)
 
 
-# 测试模式:相邻弹跳垫的间距(弧线高度/时长按"跳过几个垫"缩放用)
-func test_spacing() -> float:
-	return TEST_SPACING
+# 相邻垫/格子的间距(连续距离跳的弧线缩放用):测试模式用更大的 TEST_SPACING,否则普通 SPACING
+func jump_spacing() -> float:
+	return TEST_SPACING if _test_mode else SPACING
+
+
+# tier 1 吸附落点容差
+func snap_tolerance() -> float:
+	return SNAP_TOLERANCE
 
 
 # 格子"基座"的世界坐标(底面贴地):只在铺格子时用
@@ -521,19 +563,33 @@ func _manual_reset() -> void:
 	_reset_player()
 
 
+func _is_teaching_mode(mode: String) -> bool:
+	return mode == "add" or mode == "sub" or mode == "mul" or mode == "div"
+
+
 func _hint_text() -> String:
 	if _test_mode:
 		return "W A S D 按住蓄力 · 蓄力时间决定距离 · 松开跳出 · 依次跳上大/中/小垫到金色终点 · R 重置"
-	var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
 	if _endless_mode:
-		return base + " · 答错或掉落即结束"
+		return "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置 · 答错或掉落即结束"
+	if _is_teaching_mode(current_mode):
+		var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
+		match _tier:
+			1:
+				return base + " · 按住蓄力,时间越长跳得越远"
+			2:
+				return base + " · 松开后精准落地,要落在垫子上"
+			3:
+				return base + " · 垫子有大/中/小,瞄准精准落点"
+		return base
+	# 非教学关卡:仅保留模式专属玩法说明,去掉基础操控提示
 	if _sign_flip_mode:
-		return base + " · 空格 蓄满翻转符号"
+		return "空格 蓄满翻转符号"
 	if _memory_mode:
-		return base + " · 数字跳上去才显示"
+		return "数字跳上去才显示"
 	if current_mode == "op":
-		return base + " · 紫色格子是运算符"
-	return base
+		return "紫色格子是运算符"
+	return ""
 
 
 # ---- 无尽模式 --------------------------------------------------------------
