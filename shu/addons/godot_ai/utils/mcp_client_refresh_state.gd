@@ -2,7 +2,7 @@
 class_name McpClientRefreshState
 extends RefCounted
 
-## State machine for the plugin-lifetime client's status refresh sweep. Single
+## State machine for the dock's client-status refresh sweep. Single
 ## source of truth — supersedes the seven booleans + deadline previously
 ## scattered across `mcp_dock.gd` (`_client_status_refresh_in_flight`,
 ## `_client_status_refresh_pending`, `_client_status_refresh_pending_force`,
@@ -18,20 +18,23 @@ extends RefCounted
 const IDLE := 0
 ## A refresh request landed but the editor filesystem is busy
 ## (`EditorInterface.get_resource_filesystem().is_scanning()` is true);
-## the job owner parks the request and retries on the next `_process` after
-## the scan settles. A separate force bit preserves an explicit retry request.
+## the dock parks the request and retries on the next `_process` after
+## the scan settles. Held alongside two flags (force / initial) for
+## what kind of refresh to retry; those live next to the state, not
+## inside it, because they're requests not state.
 const DEFERRED_FOR_FILESYSTEM := 1
 ## Worker thread is alive and probing client status off-main. The
-## Dock snapshots paint "(checking...)" in the clients summary and the owner accepts
+## dock paints "(checking...)" in the clients summary and accepts
 ## additional requests as `pending`.
 const RUNNING := 2
 ## Worker has been alive past CLIENT_STATUS_REFRESH_TIMEOUT_MSEC. The
-## dock paints "(client probe still running)"; further requests coalesce into
-## one retry after this sole worker exits.
+## dock paints "(client probe still running)" and a forced refresh is
+## allowed to abandon the worker into the orphan list and start a new
+## sweep. The state stays RUNNING after a forced abandon-and-restart.
 const RUNNING_TIMED_OUT := 3
-## Plugin teardown / update activation is draining workers. New refresh
-## requests are rejected outright until an explicitly failed handoff resumes
-## the same owner.
+## `_exit_tree` / `_install_update` is draining workers. New refresh
+## requests are rejected outright. Set once and not cleared (the dock
+## instance is being torn down).
 const SHUTTING_DOWN := 4
 
 const _NAMES := {
@@ -48,7 +51,8 @@ static func name_of(state: int) -> String:
 
 
 ## True when a worker thread should be alive in this state. Combined
-## state — RUNNING or RUNNING_TIMED_OUT both have the sole worker running.
+## state — RUNNING or RUNNING_TIMED_OUT both have a worker running, but
+## the timed-out flavor allows a force-refresh to abandon it.
 static func has_worker_alive(state: int) -> bool:
 	return state == RUNNING or state == RUNNING_TIMED_OUT
 
@@ -62,7 +66,8 @@ static func should_disable_client_actions(state: int) -> bool:
 
 
 ## True when the dock should reject new refresh spawns. Used by the
-## job owner's deferred entrypoint and status-refresh scheduler.
+## dock's two refresh-spawn guards (the deferred refresh entrypoint and
+## the status-refresh scheduler).
 static func is_blocked_for_spawn(state: int) -> bool:
 	return state == SHUTTING_DOWN
 
@@ -92,10 +97,11 @@ static func can_transition(from: int, to: int) -> bool:
 			return to == RUNNING or to == IDLE
 		RUNNING:
 			## Worker finishes -> IDLE. Worker outlives budget ->
-			## RUNNING_TIMED_OUT.
+			## RUNNING_TIMED_OUT. Forced respawn after orphan abandon
+			## stays in RUNNING (covered by from == to above).
 			return to == IDLE or to == RUNNING_TIMED_OUT
 		RUNNING_TIMED_OUT:
-			## The sole late-arriving worker drops back to IDLE. A coalesced
-			## retry then starts through the ordinary IDLE -> RUNNING edge.
-			return to == IDLE
+			## Late-arriving worker result drops back to IDLE; forced
+			## abandon-and-respawn drops back to RUNNING.
+			return to == IDLE or to == RUNNING
 	return false

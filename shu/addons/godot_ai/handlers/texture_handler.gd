@@ -1,5 +1,5 @@
 @tool
-extends "res://addons/godot_ai/handlers/command_handler.gd"
+extends RefCounted
 
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 
@@ -195,4 +195,5 @@ func _assign_texture(tex: Resource, sub_resources: Array, node_path: String, pro
 	}
 	data.merge(extra)
 	return {"data": data}
+
 

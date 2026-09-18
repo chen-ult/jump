@@ -1,5 +1,5 @@
 @tool
-extends "res://addons/godot_ai/handlers/command_handler.gd"
+extends RefCounted
 
 ## Read-only access to version-correct Godot class metadata.
 

@@ -1,5 +1,5 @@
 @tool
-extends "res://addons/godot_ai/handlers/command_handler.gd"
+extends RefCounted
 
 ## TileMap / TileMapLayer authoring — set, fill, clear, and read tile cells
 ## directly in the editor scene with full undo/redo support.

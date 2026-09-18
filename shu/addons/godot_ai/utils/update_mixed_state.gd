@@ -72,9 +72,8 @@ static func find_backups(dir: String = ADDON_DIR) -> Array:
 		## determinism matters for the truncated case.
 		for i in range(entries.size() - 1, -1, -1):
 			var entry: Dictionary = entries[i]
-			var child_path := current.path_join(entry["name"])
-			if entry["is_dir"] and not d.is_link(child_path):
-				stack.append(child_path)
+			if entry["is_dir"]:
+				stack.append(current.path_join(entry["name"]))
 		for entry in entries:
 			if entry["is_dir"]:
 				continue
