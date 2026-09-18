@@ -5,24 +5,76 @@ extends RefCounted
 
 const Solvability := preload("res://scripts/solvability.gd")
 
-const OPS := ["add", "sub", "mul", "div"]
+const OPS := ["add", "sub", "mul", "div"]  # 四则运算(算术类)
 
 
-# 生成第 difficulty 关(从 1 起)。mode 传 "mixed"/"endless" 时每关随机挑一种运算。
+# 生成第 difficulty 关(从 1 起)。mode 传 "mixed"/"endless" 时按难度曲线随机挑一种模式。
 static func generate(mode: String, difficulty: int) -> Dictionary:
-	if mode == "mixed" or mode == "endless":
-		mode = OPS[randi() % OPS.size()]
-	var hi := mini(5 + difficulty, 20)       # 数字上限:第 1 关 ≤6,第 15 关封顶 20
-	var slots := 1 if difficulty < 4 else 2  # 空位数:第 4 关起两个空位
+	var cfg := _difficulty_config(difficulty)
+	if mode != "mixed" and mode != "endless":
+		cfg["mode"] = mode  # 指定单一模式时覆盖随机选择
 	for _attempt in range(200):
-		var level := _try_generate(mode, hi, slots)
+		var level := _try_generate(cfg["mode"], cfg["hi"], cfg["slots"])
 		if not level.is_empty():
+			level["tier"] = cfg["tier"]
+			level["time_limit"] = cfg["time_limit"]
 			return level
-	return _fallback(slots)
+	var fb := _fallback(cfg["slots"])
+	fb["tier"] = cfg["tier"]
+	fb["time_limit"] = cfg["time_limit"]
+	return fb
+
+
+# 难度曲线:随关卡缓慢递增的模式池 / 数字上限 / 空位数 / tier / 限时
+static func _difficulty_config(difficulty: int) -> Dictionary:
+	var pool: Array = _mode_pool(difficulty)
+	return {
+		"mode": pool[randi() % pool.size()],
+		"hi": mini(6 + int((difficulty - 1) / 2.0), 20),  # 数字上限缓慢增长
+		"slots": 1 if difficulty < 6 else 2,
+		"tier": _tier_for(difficulty),
+		"time_limit": _time_limit_for(difficulty),
+	}
+
+
+# 可选模式池:逐段解锁,体现"缓慢递增"
+static func _mode_pool(difficulty: int) -> Array:
+	if difficulty <= 2:
+		return ["add"]
+	if difficulty <= 4:
+		return ["add", "sub"]
+	if difficulty <= 7:
+		return ["add", "sub", "mul", "div"]
+	if difficulty <= 10:
+		return ["add", "sub", "mul", "div", "op"]
+	return ["add", "sub", "mul", "div", "op", "memory"]
+
+
+# 跳跃机制 tier:0 离散跳 → 1 距离吸附 → 2 精准落点 → 3 随机垫大小
+static func _tier_for(difficulty: int) -> int:
+	if difficulty < 5:
+		return 0
+	if difficulty < 9:
+		return 1
+	if difficulty < 14:
+		return 2
+	return 3
+
+
+# 限时(秒):第 10 关起才计时,45s 起每关 -2s,下限 20s
+static func _time_limit_for(difficulty: int) -> int:
+	if difficulty < 10:
+		return 0
+	return clampi(45 - (difficulty - 10) * 2, 20, 45)
 
 
 # 生成一关;不可解时返回 {} 触发重试
 static func _try_generate(mode: String, hi: int, slots: int) -> Dictionary:
+	if mode == "op":
+		return _try_generate_op(hi)
+	var memory := mode == "memory"
+	if memory:
+		mode = OPS[randi() % OPS.size()]  # 记忆翻牌 = 隐藏数字的四则运算关
 	var a: int
 	var b: int
 	var c: int
@@ -66,7 +118,47 @@ static func _try_generate(mode: String, hi: int, slots: int) -> Dictionary:
 	if not check["solvable"]:
 		return {}
 	return {
-		"mode": mode,
+		"mode": "memory" if memory else mode,
+		"equation": equation,
+		"grid": grid,
+		"start": start,
+		"sign_flip": false,
+		"memory": memory,
+		"test": false,
+	}
+
+
+# 运算符关:两个数字 + 一个运算符(3 空位),如 "? ? ? = 7"
+static func _try_generate_op(hi: int) -> Dictionary:
+	var op: String = ["+", "-", "*"][randi() % 3]
+	var a: int
+	var b: int
+	var c: int
+	match op:
+		"+":
+			a = randi_range(1, hi)
+			b = randi_range(1, hi)
+			while b == a:
+				b = randi_range(1, hi)
+			c = a + b
+		"-":
+			a = randi_range(2, hi)
+			b = randi_range(1, a - 1)
+			c = a - b
+		"*":
+			a = randi_range(2, mini(hi, 9))
+			b = randi_range(2, mini(hi, 9))
+			while b == a:
+				b = randi_range(2, mini(hi, 9))
+			c = a * b
+	var equation := [_slot(), _slot(), _slot(), _op("="), _num(c)]
+	var grid := _build_op_grid(a, b, op, hi)
+	var start := {"c": 1, "r": 3}
+	var check := Solvability.check(grid, start, equation, false)
+	if not check["solvable"]:
+		return {}
+	return {
+		"mode": "op",
 		"equation": equation,
 		"grid": grid,
 		"start": start,
@@ -94,6 +186,22 @@ static func _build_grid(grab: Array, hi: int) -> Array:
 	for i in 9:
 		var val: int = grab[i] if i < grab.size() else randi_range(1, hi)
 		out.append({"type": "num", "value": val, "c": positions[i][0], "r": positions[i][1]})
+	return out
+
+
+# 运算符关网格:2 个数字格 + 1 个运算符格 + 6 个干扰数字
+static func _build_op_grid(a: int, b: int, op_str: String, hi: int) -> Array:
+	var positions: Array = []
+	for r in 3:
+		for c in 3:
+			positions.append([c, r])
+	positions.shuffle()
+	var out: Array = []
+	out.append({"type": "num", "value": a, "c": positions[0][0], "r": positions[0][1]})
+	out.append({"type": "num", "value": b, "c": positions[1][0], "r": positions[1][1]})
+	out.append({"type": "op", "value": op_str, "c": positions[2][0], "r": positions[2][1]})
+	for i in range(3, 9):
+		out.append({"type": "num", "value": randi_range(1, hi), "c": positions[i][0], "r": positions[i][1]})
 	return out
 
 

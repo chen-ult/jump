@@ -251,6 +251,7 @@ func _do_distance_jump() -> void:
 	_charge_ring.visible = false
 	_body.scale = Vector3.ONE
 	var from := Vector2i(grid_col, grid_row)
+	departed.emit(from.x, from.y)  # 记忆玩法在距离跳下也跳离即隐藏
 	var dist := _distance()
 	var dir3 := Vector3(charge_dir.x, 0.0, charge_dir.y)
 	var land_end := position + dir3 * dist

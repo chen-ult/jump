@@ -30,6 +30,18 @@ static func set_endless_best(level: int) -> void:
 	_save(data)
 
 
+# 无尽模式最高得分(取历史最大)
+static func endless_best_score() -> int:
+	return int(_load().get("endless_best_score", 0))
+
+
+static func set_endless_best_score(score: int) -> void:
+	var data := _load()
+	var cur := int(data.get("endless_best_score", 0))
+	data["endless_best_score"] = maxi(cur, score)
+	_save(data)
+
+
 static func _load() -> Dictionary:
 	if not FileAccess.file_exists(SAVE_PATH):
 		return {}

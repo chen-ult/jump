@@ -29,6 +29,10 @@ var slot_styles: Array = []
 var _active_index: int = -1
 var _pulse_tween: Tween
 var _hint_label: Label
+var _score_label: Label
+var _time_label: Label
+var _time_pulse_tween: Tween
+var _displayed_score: int = 0
 
 
 func _ready() -> void:
@@ -86,6 +90,7 @@ func _build_ui() -> void:
 	_root.add_child(_banner)
 
 	_build_charge_ui()
+	_build_score_time_ui()
 	_build_pause_ui()
 
 
@@ -138,6 +143,35 @@ func _build_charge_ui() -> void:
 	_fill_sb.set_corner_radius_all(14)
 	_charge_bar.add_theme_stylebox_override("fill", _fill_sb)
 	box.add_child(_charge_bar)
+
+
+# 分数(左上,关卡标签下方) + 倒计时(右上,暂停按钮下方)
+func _build_score_time_ui() -> void:
+	_score_label = _make_label("分数 0", 30, Color("#5a4a66"))
+	_score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_score_label.anchor_left = 0.0
+	_score_label.anchor_top = 0.0
+	_score_label.anchor_right = 0.0
+	_score_label.anchor_bottom = 0.0
+	_score_label.offset_left = 22.0
+	_score_label.offset_top = 64.0
+	_score_label.offset_right = 300.0
+	_score_label.offset_bottom = 104.0
+	_score_label.visible = false
+	_root.add_child(_score_label)
+
+	_time_label = _make_label("⏱ 30", 32, Color("#5a4a66"))
+	_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_time_label.anchor_left = 1.0
+	_time_label.anchor_top = 0.0
+	_time_label.anchor_right = 1.0
+	_time_label.anchor_bottom = 0.0
+	_time_label.offset_left = -220.0
+	_time_label.offset_top = 70.0
+	_time_label.offset_right = -16.0
+	_time_label.offset_bottom = 110.0
+	_time_label.visible = false
+	_root.add_child(_time_label)
 
 
 # 右上角暂停按钮 + 暂停弹层(继续游戏 / 退出)
@@ -272,6 +306,71 @@ func set_hint(txt: String) -> void:
 		_hint_label.visible = txt != ""
 
 
+# 无尽模式分数:数字滚动 + 放大弹回
+func set_score(v: int) -> void:
+	_score_label.visible = true
+	var t := create_tween()
+	t.tween_method(_set_score_text, _displayed_score, v, 0.4)
+	_displayed_score = v
+	_score_label.pivot_offset = _score_label.size / 2.0
+	_score_label.scale = Vector2(1.3, 1.3)
+	var p := create_tween()
+	p.tween_property(_score_label, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _set_score_text(val: float) -> void:
+	_score_label.text = "分数 %d" % int(val)
+
+
+func hide_score() -> void:
+	_score_label.visible = false
+
+
+# 过关得分弹出:一个 "+N" 从分数旁上浮淡出
+func show_score_gain(gained: int) -> void:
+	var lbl := _make_label("+%d" % gained, 42, Color("#ffd166"))
+	lbl.add_theme_color_override("font_outline_color", Color("#b07a2f"))
+	lbl.add_theme_constant_override("outline_size", 8)
+	lbl.position = Vector2(24.0, 108.0)
+	_root.add_child(lbl)
+	var t := create_tween()
+	t.set_parallel(true)
+	t.tween_property(lbl, "position:y", lbl.position.y - 70.0, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.tween_property(lbl, "modulate:a", 0.0, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	t.chain().tween_callback(lbl.queue_free)
+
+
+# 无尽模式倒计时:剩余 ≤5s 变红并脉冲
+func set_time_left(left: float, total: float) -> void:
+	if total <= 0.0:
+		_time_label.visible = false
+		if _time_pulse_tween:
+			_time_pulse_tween.kill()
+		return
+	_time_label.visible = true
+	var sec := int(ceil(left))
+	_time_label.text = "⏱ %d" % sec
+	var low: bool = sec <= 5
+	_time_label.add_theme_color_override("font_color", Color("#ff4d6d") if low else Color("#5a4a66"))
+	if low:
+		_pulse_time_label()
+	elif _time_pulse_tween:
+		_time_pulse_tween.kill()
+		_time_label.scale = Vector2.ONE
+
+
+func _pulse_time_label() -> void:
+	if _time_pulse_tween and _time_pulse_tween.is_running():
+		return  # 已在脉冲中:set_time_left 每帧调用,避免反复重建 tween
+	if _time_pulse_tween:
+		_time_pulse_tween.kill()
+	_time_label.pivot_offset = _time_label.size / 2.0
+	_time_label.scale = Vector2.ONE
+	_time_pulse_tween = create_tween().set_loops()
+	_time_pulse_tween.tween_property(_time_label, "scale", Vector2(1.25, 1.25), 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_time_pulse_tween.tween_property(_time_label, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
 # 测试模式:隐藏等式框(没有等式),提示交给 set_hint
 func setup_test_mode() -> void:
 	_eq_box.visible = false
@@ -389,6 +488,12 @@ func _show_banner(txt: String, dur: float) -> void:
 	_banner_label.text = txt
 	_banner_label.add_theme_color_override("font_color", Color("#ffd166"))
 	_banner.visible = true
+	_banner_label.pivot_offset = _banner_label.get_combined_minimum_size() / 2.0
+	_banner_label.scale = Vector2(0.7, 0.7)
+	_banner_label.modulate.a = 0.0
 	var t := create_tween()
+	t.tween_property(_banner_label, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.parallel().tween_property(_banner_label, "modulate:a", 1.0, 0.2)
 	t.tween_interval(dur)
+	t.tween_property(_banner_label, "modulate:a", 0.0, 0.3)
 	t.tween_callback(func(): _banner.visible = false)

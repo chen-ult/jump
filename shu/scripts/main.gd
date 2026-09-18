@@ -16,6 +16,7 @@ const TILE_HEIGHT := 0.55  # 棋子圆柱的高度,顶面即主角的站立面
 const PLAYER_RADIUS := 0.2  # 主角"碰撞"半径(棋子底盘),落地判定时身体碰垫即算落上
 const PAD_SIZES := ["large", "medium", "small"]  # 教学 tier 3 随机分布的大中小档位
 const SNAP_TOLERANCE := SPACING * 0.8  # tier 1 吸附落点容差(宽容,允许略微偏离)
+const PAD_GAP_RATIO := 0.25  # tier 3 相邻垫子中心距 = 半径和 × (1 + 此值);0 = 刚好相切无间隙
 
 var equation
 var active_slot: int = -1
@@ -36,8 +37,15 @@ var _test_mode: bool = false
 var _tier: int = 0  # 教学三级难度档位(0=经典离散跳,1=连续距离跳,2=精准落点,3=变尺寸)
 var _endless_mode: bool = false
 var _endless_level: int = 1
+var _score: int = 0
+var _time_limit: float = 0.0
+var _time_left: float = 0.0
+var _current_level_mode: String = "add"
 var _last_land_slot: int = -1
 var _revealed_tile: Node3D = null
+var _col_x: Dictionary = {}       # tier 3 按尺寸算出的每列 x 坐标(col -> x)
+var _row_z: Dictionary = {}       # tier 3 按尺寸算出的每行 z 坐标(row -> z)
+var _effective_spacing: float = 0.0  # tier 3 相邻垫平均间距(跳跃距离标定用)
 
 
 func _ready() -> void:
@@ -104,7 +112,7 @@ func _return_to_mode_select() -> void:
 		menu.show_mode_page()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _busy or menu != null:
 		return
 	if player and is_instance_valid(player) and player.is_falling():
@@ -117,6 +125,7 @@ func _process(_delta: float) -> void:
 	if Input.is_action_just_pressed("reset"):
 		_manual_reset()
 	_update_charge_ui()
+	_update_countdown(delta)
 
 
 func _update_charge_ui() -> void:
@@ -182,6 +191,9 @@ func _load_level(idx: int) -> void:
 	_sign_flip_mode = bool(data.get("sign_flip", false))
 	_test_mode = bool(data.get("test", false))
 	_tier = int(data.get("tier", 0))
+	_time_limit = float(data.get("time_limit", 0.0))
+	_time_left = _time_limit
+	_current_level_mode = str(data.get("mode", "add"))
 	if _test_mode:
 		_load_test_level(data)
 		return
@@ -203,6 +215,12 @@ func _load_level(idx: int) -> void:
 	hud.set_tokens(data["equation"])
 	hud.set_active(0)
 	hud.set_hint(_hint_text())
+	if _endless_mode:
+		hud.set_score(_score)
+		hud.set_time_left(_time_left, _time_limit)
+	else:
+		hud.hide_score()
+		hud.set_time_left(0.0, 0.0)
 	_spawn_grid()
 	_spawn_player()
 
@@ -257,35 +275,97 @@ func _shuffle_grid_numbers(grid: Array) -> Array:
 
 
 func _spawn_grid() -> void:
+	_col_x = {}
+	_row_z = {}
+	_effective_spacing = 0.0
 	var data: Dictionary = levels[level_index]
+	var cells: Array = []  # 记录 (c,r,tile),tier 3 按尺寸摆位用
 	for entry in data["grid"]:
 		var c: int = entry["c"]
 		var r: int = entry["r"]
 		var tile = TileScene.instantiate()
 		add_child(tile)
-		tile.position = tile_base_world(c, r)
 		tile.set_content(entry["type"], entry["value"])
 		if _tier >= 3:
 			tile.set_size(_random_pad_size())
 		if _memory_mode:
 			tile.set_memory(true)
 		tiles["%d,%d" % [c, r]] = tile
+		cells.append({"c": c, "r": r, "tile": tile})
 	# 起点垫(value=0,不填数字)
 	var start: Dictionary = data["start"]
 	var sc: int = start["c"]
 	var sr: int = start["r"]
 	var spad = TileScene.instantiate()
 	add_child(spad)
-	spad.position = tile_base_world(sc, sr)
 	spad.set_content("num", 0)
 	if _memory_mode:
 		spad.set_memory(true)
 	tiles["%d,%d" % [sc, sr]] = spad
+	cells.append({"c": sc, "r": sr, "tile": spad})
+	# tier 3:按垫子大小重排列/行间距,避免大垫子连在一起
+	if _tier >= 3:
+		_layout_cells(cells)
+	for cell in cells:
+		cell["tile"].position = tile_base_world(cell["c"], cell["r"])
 
 
 # 教学 tier 3:随机返回一个大/中/小档位
 func _random_pad_size() -> String:
 	return PAD_SIZES[randi() % PAD_SIZES.size()]
+
+
+# tier 3:根据每列/每行的最大垫半径把网格拉开,相邻垫子边缘间隙按半径比例留
+func _layout_cells(cells: Array) -> void:
+	var col_radius := {}
+	var row_radius := {}
+	for cell in cells:
+		var c: int = cell["c"]
+		var r: int = cell["r"]
+		var rad: float = cell["tile"].radius()
+		col_radius[c] = maxf(col_radius.get(c, 0.0), rad)
+		row_radius[r] = maxf(row_radius.get(r, 0.0), rad)
+	_col_x = _center_map(_cumulative_positions(col_radius))
+	_row_z = _center_map(_cumulative_positions(row_radius))
+	_effective_spacing = (_average_gap(_col_x) + _average_gap(_row_z)) * 0.5
+
+
+# 索引 -> 半径 累加得到 索引 -> 位置:相邻间距 = (前半径 + 后半径) × (1 + PAD_GAP_RATIO)
+func _cumulative_positions(radius_by_index: Dictionary) -> Dictionary:
+	var pos := {}
+	var keys: Array = radius_by_index.keys()
+	keys.sort()
+	for i in keys.size():
+		var k = keys[i]
+		if i == 0:
+			pos[k] = 0.0
+		else:
+			var prev = keys[i - 1]
+			pos[k] = pos[prev] + (radius_by_index[prev] + radius_by_index[k]) * (1.0 + PAD_GAP_RATIO)
+	return pos
+
+
+# 把位置表整体平移,使其中心落在原点(保持网格居中)
+func _center_map(pos: Dictionary) -> Dictionary:
+	if pos.is_empty():
+		return pos
+	var vals: Array = pos.values()
+	var center: float = (vals.min() + vals.max()) * 0.5
+	for k in pos:
+		pos[k] -= center
+	return pos
+
+
+# 相邻位置的平均间距(单列/单行时退回 SPACING)
+func _average_gap(pos: Dictionary) -> float:
+	var keys: Array = pos.keys()
+	keys.sort()
+	var total := 0.0
+	var n := 0
+	for i in range(1, keys.size()):
+		total += abs(pos[keys[i]] - pos[keys[i - 1]])
+		n += 1
+	return total / n if n > 0 else SPACING
 
 
 # 测试模式:起点垫 + 大中小三个跳跃垫(最后一个为终点),垫子沿 -Z 以更大的间距排布
@@ -377,12 +457,18 @@ func _spawn_player() -> void:
 
 # 格子"站立点"的世界坐标(圆柱顶面):主角位置与跳跃落点都用它
 func grid_to_world(col: int, row: int) -> Vector3:
-	return Vector3((col - 1) * SPACING, TILE_HEIGHT, (row - 1) * SPACING)
+	var x: float = _col_x.get(col, (col - 1) * SPACING)
+	var z: float = _row_z.get(row, (row - 1) * SPACING)
+	return Vector3(x, TILE_HEIGHT, z)
 
 
 # 相邻垫/格子的间距(连续距离跳的弧线缩放用):测试模式用更大的 TEST_SPACING,否则普通 SPACING
 func jump_spacing() -> float:
-	return TEST_SPACING if _test_mode else SPACING
+	if _test_mode:
+		return TEST_SPACING
+	if _tier >= 3 and _effective_spacing > 0.0:
+		return _effective_spacing
+	return SPACING
 
 
 # tier 1 吸附落点容差
@@ -392,7 +478,9 @@ func snap_tolerance() -> float:
 
 # 格子"基座"的世界坐标(底面贴地):只在铺格子时用
 func tile_base_world(col: int, row: int) -> Vector3:
-	return Vector3((col - 1) * SPACING, 0.0, (row - 1) * SPACING)
+	var x: float = _col_x.get(col, (col - 1) * SPACING)
+	var z: float = _row_z.get(row, (row - 1) * SPACING)
+	return Vector3(x, 0.0, z)
 
 
 func is_walkable(col: int, row: int) -> bool:
@@ -571,7 +659,23 @@ func _hint_text() -> String:
 	if _test_mode:
 		return "W A S D 按住蓄力 · 蓄力时间决定距离 · 松开跳出 · 依次跳上大/中/小垫到金色终点 · R 重置"
 	if _endless_mode:
-		return "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置 · 答错或掉落即结束"
+		var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
+		match _tier:
+			1:
+				base += " · 按住蓄力,时间越长跳得越远"
+			2:
+				base += " · 松开后精准落地,要落在垫子上"
+			3:
+				base += " · 垫子有大/中/小,瞄准精准落点"
+			_:
+				base += " · 按键跳一格"
+		if _memory_mode:
+			base += " · 数字跳上去才显示"
+		elif _current_level_mode == "op":
+			base += " · 紫色格子是运算符"
+		if _time_limit > 0.0:
+			base += " · ⏱ 限时"
+		return base + " · 答错/掉落/超时即结束"
 	if _is_teaching_mode(current_mode):
 		var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
 		match _tier:
@@ -597,6 +701,7 @@ func _hint_text() -> String:
 func _start_endless() -> void:
 	_endless_mode = true
 	_endless_level = 1
+	_score = 0
 	levels = [LevelGenerator.generate("mixed", _endless_level)]
 	_load_level(0)
 
@@ -611,20 +716,58 @@ func _next_endless() -> void:
 func _end_game() -> void:
 	var level := _endless_level
 	var prev_best := Progress.endless_best()
+	var prev_best_score := Progress.endless_best_score()
 	Progress.set_endless_best(level)
-	var is_record := level > prev_best
+	Progress.set_endless_best_score(_score)
 	_endless_mode = false
-	if is_record:
-		hud.show_endless_over("新纪录！到达第 %d 关" % level)
-	else:
-		hud.show_endless_over("到达第 %d 关 · 最高 %d 关" % [level, Progress.endless_best()])
+	var txt := "分数 %d · 到达第 %d 关" % [_score, level]
+	if level > prev_best:
+		txt = "新纪录！" + txt
+	elif _score > prev_best_score:
+		txt = "新分数纪录！" + txt
+	hud.show_endless_over(txt)
 	await get_tree().create_timer(2.2).timeout
 	_return_to_mode_select()
 
 
+# 无尽模式过关得分:基础分随关数递增,限时关再按剩余秒数加分
+func _award_score() -> void:
+	var base := 100 + _endless_level * 10
+	var time_bonus := int(ceil(_time_left)) * 5 if _time_limit > 0.0 else 0
+	var gained := base + time_bonus
+	_score += gained
+	hud.set_score(_score)
+	hud.show_score_gain(gained)
+
+
+# 无尽模式倒计时:仅限时关运行;_process 在 _busy/暂停/坠落时提前 return,计时自动冻结
+func _update_countdown(delta: float) -> void:
+	if not _endless_mode or _time_limit <= 0.0:
+		return
+	_time_left -= delta
+	if _time_left <= 0.0:
+		_time_left = 0.0
+		hud.set_time_left(_time_left, _time_limit)
+		_on_timeout()
+		return
+	hud.set_time_left(_time_left, _time_limit)
+
+
+# 倒计时归零:直接结束整局(与答错/掉落一致)
+func _on_timeout() -> void:
+	if _busy:
+		return
+	_busy = true
+	hud.show_wrong("时间到！")
+	await get_tree().create_timer(0.7).timeout
+	await _end_game()
+
+
 func _win() -> void:
 	_busy = true
-	if not _endless_mode:
+	if _endless_mode:
+		_award_score()
+	else:
 		Progress.on_level_passed(current_mode, level_index)
 	hud.show_win()
 	_spawn_confetti()

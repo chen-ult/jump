@@ -15,9 +15,7 @@ const MODES := [
 	{"id": "mul", "name": "乘法"},
 	{"id": "div", "name": "除法"},
 	{"id": "op", "name": "运算符"},
-	{"id": "sign", "name": "翻转符号"},
 	{"id": "memory", "name": "记忆翻牌"},
-	{"id": "test", "name": "测试模式"},
 	{"id": "endless", "name": "无尽模式"},
 ]
 
