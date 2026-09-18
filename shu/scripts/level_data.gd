@@ -38,6 +38,7 @@ static func _build_level(raw: Dictionary) -> Dictionary:
 		"memory": bool(raw.get("memory", false)),
 		"test": test,
 		"tier": int(raw.get("tier", 0)),
+		"title": str(raw.get("title", "")),
 		"pads": _parse_test_pads(raw, start) if test else [],
 	}
 

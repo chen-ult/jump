@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "mcp__godot-ai__session_manage"
+      "mcp__godot-ai__session_manage",
+      "Bash(python *)",
+      "mcp__godot-ai__project_run",
+      "mcp__godot-ai__editor_manage",
+      "mcp__godot-ai__game_manage",
+      "mcp__godot-ai__editor_screenshot",
+      "mcp__godot-ai__logs_read",
+      "mcp__godot-ai__project_manage"
     ]
   }
 }

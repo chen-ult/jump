@@ -10,6 +10,7 @@ const Solvability := preload("res://scripts/solvability.gd")
 
 # 模式列表:id 与 levels.json 里的 mode 对应,顺序即菜单显示顺序
 const MODES := [
+	{"id": "tutorial", "name": "教学"},
 	{"id": "add", "name": "加法"},
 	{"id": "sub", "name": "减法"},
 	{"id": "mul", "name": "乘法"},
@@ -24,6 +25,7 @@ var _main_page: Control
 var _mode_page: Control
 var _level_page: Control
 var _level_list: VBoxContainer
+var _mode_grid: GridContainer
 var _selected_mode: String = "add"
 
 
@@ -97,16 +99,13 @@ func _build_mode_page() -> void:
 	header.add_theme_color_override("font_color", Color("#5a4a66"))
 	vbox.add_child(header)
 
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 28)
-	grid.add_theme_constant_override("v_separation", 20)
-	for m in MODES:
-		var btn := _make_button(m["name"], Color("#7fb0d1") if m["id"] == "endless" else Color("#ff7aa2"))
-		btn.pressed.connect(_on_mode_pressed.bind(m["id"]))
-		grid.add_child(btn)
+	_mode_grid = GridContainer.new()
+	_mode_grid.columns = 2
+	_mode_grid.add_theme_constant_override("h_separation", 28)
+	_mode_grid.add_theme_constant_override("v_separation", 20)
+	_populate_modes()
 	var cgrid := CenterContainer.new()
-	cgrid.add_child(grid)
+	cgrid.add_child(_mode_grid)
 	vbox.add_child(cgrid)
 
 	var back_btn := _make_button("返回", Color("#9a8aa9"))
@@ -114,6 +113,23 @@ func _build_mode_page() -> void:
 	var c2 := CenterContainer.new()
 	c2.add_child(back_btn)
 	vbox.add_child(c2)
+
+
+# 按当前解锁进度重建模式按钮:未解锁的章节显示 🔒 并禁用
+func _populate_modes() -> void:
+	for child in _mode_grid.get_children():
+		child.queue_free()
+	for m in MODES:
+		var unlocked := Progress.is_mode_unlocked(m["id"])
+		var label := ("🔒 " if not unlocked else "") + str(m["name"])
+		var btn := _make_button(label, Color("#7fb0d1") if m["id"] == "endless" else Color("#ff7aa2"))
+		if unlocked:
+			btn.pressed.connect(_on_mode_pressed.bind(m["id"]))
+		else:
+			btn.disabled = true
+			btn.add_theme_stylebox_override("disabled", _locked_style())
+			btn.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.7))
+		_mode_grid.add_child(btn)
 
 
 # 选择关卡页:标题 + 关卡列表(按所选模式动态填充) + 返回
@@ -229,6 +245,7 @@ func _show_main() -> void:
 
 
 func _show_modes() -> void:
+	_populate_modes()
 	_main_page.visible = false
 	_mode_page.visible = true
 	_level_page.visible = false

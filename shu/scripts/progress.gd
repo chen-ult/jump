@@ -1,13 +1,35 @@
 extends RefCounted
 
-# 关卡解锁进度:持久化到 user://progress.json,跨启动保留
+# 关卡解锁进度:持久化到 user://progress.json,跨启动保留。
+# 章节按 MODE_SEQUENCE 顺序全局解锁(前一章通关才解锁下一章),章节内关卡再逐关解锁。
 
 const SAVE_PATH := "user://progress.json"
+
+const LevelData := preload("res://scripts/level_data.gd")
+
+# 全局顺序解锁:按此顺序逐个开放章节,前一章全部通关才解锁下一章
+const MODE_SEQUENCE := ["tutorial", "add", "sub", "mul", "div", "op", "memory", "endless"]
 
 
 # 该模式当前解锁到第几关(1 = 只有第1关)
 static func unlocked_count(mode: String) -> int:
 	return int(_load().get(mode, 1))
+
+
+# 某模式是否已解锁:其之前的所有模式都已通关(首个模式恒解锁)
+static func is_mode_unlocked(mode: String) -> bool:
+	var idx := MODE_SEQUENCE.find(mode)
+	if idx <= 0:
+		return true
+	for i in range(idx):
+		if not _is_mode_completed(MODE_SEQUENCE[i]):
+			return false
+	return true
+
+
+# 某模式是否已通关:解锁的关卡数超过该模式关卡总数
+static func _is_mode_completed(mode: String) -> bool:
+	return unlocked_count(mode) > LevelData.levels_of_mode(mode).size()
 
 
 # 通过某关后解锁下一关

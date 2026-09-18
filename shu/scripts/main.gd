@@ -11,7 +11,7 @@ const Solvability := preload("res://scripts/solvability.gd")
 const LevelGenerator := preload("res://scripts/level_generator.gd")
 
 const SPACING := 2.2
-const TEST_SPACING := 2.6  # 测试模式弹跳垫之间的间距(略大于普通格子)
+const TEST_SPACING := 3.2  # 教学/测试模式弹跳垫之间的间距(拉开距离,便于看清每个垫子)
 const TILE_HEIGHT := 0.55  # 棋子圆柱的高度,顶面即主角的站立面
 const PLAYER_RADIUS := 0.2  # 主角"碰撞"半径(棋子底盘),落地判定时身体碰垫即算落上
 const PAD_SIZES := ["large", "medium", "small"]  # 教学 tier 3 随机分布的大中小档位
@@ -225,11 +225,11 @@ func _load_level(idx: int) -> void:
 	_spawn_player()
 
 
-# 测试模式:无等式,铺设起点垫 + 大中小三个跳跃垫,交给连续距离跳
-func _load_test_level(_data: Dictionary) -> void:
+# 测试/教学模式:无等式,铺设起点垫 + 一排跳跃垫(最后一个为终点),交给连续距离跳
+func _load_test_level(data: Dictionary) -> void:
 	equation = null
 	active_slot = -1
-	hud.set_level_text("测试模式")
+	hud.set_level_text(str(data.get("title", "测试模式")))
 	hud.setup_test_mode()
 	hud.set_hint(_hint_text())
 	_spawn_test_grid()
@@ -657,7 +657,7 @@ func _is_teaching_mode(mode: String) -> bool:
 
 func _hint_text() -> String:
 	if _test_mode:
-		return "W A S D 按住蓄力 · 蓄力时间决定距离 · 松开跳出 · 依次跳上大/中/小垫到金色终点 · R 重置"
+		return "W A S D 按住蓄力 · 蓄力时间决定距离 · 松开跳出 · 跳上垫子到金色终点 · R 重置"
 	if _endless_mode:
 		var base := "W A S D 蓄力跳 · ← → 或鼠标点击 移动圆圈 · R 重置"
 		match _tier:
